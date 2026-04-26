@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DynamoDB Control Tower</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"/>
+    <style>
+        /* --- NEW: Modern Dark Theme Definition --- */
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@400;600;700&display=swap');
+
+        :root[data-theme="dark"] {
+            --pico-font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            --pico-monospace-font-family: "Fira Code", "JetBrains Mono", monospace;
+
+            /* Background & Text */
+            --pico-background-color: #1a1b26; /* Rich dark blue */
+            --pico-color: #a9b1d6; /* Soft main text */
+            --pico-h1-color: #c0caf5;
+            --pico-h2-color: #c0caf5;
+            --pico-muted-color: #565f89;
+
+            /* Primary / Accent Color */
+            --pico-primary: #7aa2f7; /* Bright blue for accents */
+            --pico-primary-background: #7aa2f7;
+            --pico-primary-inverse: #1a1b26;
+            --pico-primary-hover: #9ece6a; /* A contrasting green for hover */
+            --pico-primary-hover-background: #9ece6a;
+            --pico-primary-focus: rgba(122, 162, 247, 0.25);
+
+            /* Card & Form Styling */
+            --pico-card-background-color: #24283b;
+            --pico-card-border-color: #414868;
+            --pico-form-element-background-color: #2e344f;
+            --pico-form-element-border-color: #414868;
+            --pico-form-element-focus-color: var(--pico-primary);
+            --pico-input-background-color: #1f2335;
+
+            /* Borders */
+            --pico-border-color: #414868;
+            --pico-muted-border-color: #292e42;
+
+            /* Custom Status & Log Colors */
+            --status-alive-bg: #41a6b5;   /* Teal for alive */
+            --status-down-bg: #f7768e;    /* Magenta/Red for down */
+            --status-text-color: #1a1b26; /* Dark text for contrast */
+            --log-viewer-bg: #10141a;     /* Even darker for logs */
+            --log-viewer-text: #b2ceee;   /* Lighter blue text for logs */
+        }
+
+        /* General Body & Container Styling */
+        body {
+            font-family: var(--pico-font-family);
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            padding: 2rem 1rem;
+        }
+
+        /* Header Styling */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 3rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--pico-muted-border-color); /* Softer border */
+        }
+        header h1 {
+            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 700;
+            flex-basis: 100%;
+            margin-bottom: 1rem;
+            text-shadow: 0 0 10px rgba(122, 162, 247, 0.3); /* Subtle glow effect */
+        }
+        header form {
+            margin: 0;
+            margin-right: 1rem;
+            flex-grow: 1;
+            min-width: 150px;
+        }
+        header form:last-child {
+            margin-right: 0;
+        }
+        header button {
+            width: 100%;
+            padding: 0.75rem 1.25rem;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        /* Section Styling */
+        section {
+            margin-bottom: 3rem;
+            padding-top: 1rem;
+        }
+        section h2 {
+            font-size: 1.8rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px dashed var(--pico-muted-border-color); /* Softer border */
+            padding-bottom: 0.5rem;
+        }
+        section h3 {
+            font-size: 1.4rem;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            color: var(--pico-h2-color);
+        }
+        section p {
+            margin-bottom: 1rem;
+            font-size: 0.95rem;
+            color: var(--pico-color);
+        }
+        section code {
+            background-color: var(--pico-form-element-background-color);
+            color: var(--pico-primary);
+            padding: 0.2em 0.4em;
+            border-radius: var(--pico-border-radius);
+            font-size: 0.8em;
+        }
+
+        /* Cluster Overview Grid */
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            grid-gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        article {
+            background-color: var(--pico-card-background-color);
+            border: 1px solid var(--pico-card-border-color);
+            border-radius: var(--pico-border-radius);
+            box-shadow: var(--pico-shadow-2);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: all 0.2s ease-in-out;
+        }
+        article:hover {
+            box-shadow: 0 0 15px rgba(122, 162, 247, 0.15); /* Glow on hover */
+            transform: translateY(-3px);
+            border-color: var(--pico-primary);
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .card-header strong {
+            font-size: 1.25rem;
+            color: var(--pico-h2-color);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        /* --- UPDATED: Using CSS Variables --- */
+        .status-alive { background-color: var(--status-alive-bg); color: var(--status-text-color); }
+        .status-down { background-color: var(--status-down-bg); color: var(--status-text-color); }
+
+        article p small {
+            display: block;
+            margin-top: 0.5rem;
+            color: var(--pico-muted-color);
+            font-size: 0.85rem;
+        }
+        article footer {
+            margin-top: 1.5rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--pico-muted-border-color); /* Softer border */
+            text-align: center;
+        }
+        article footer button {
+             width: 100%;
+             padding: 0.6rem 1rem;
+             font-size: 0.9rem;
+        }
+
+        /* Test Controls Styling */
+        .test-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            align-items: flex-end;
+        }
+        .test-controls form {
+            flex-grow: 1;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .test-controls input[type="text"] {
+            flex-grow: 1;
+            min-width: 120px;
+            padding: 0.75rem 1rem;
+            font-size: 1rem;
+            background-color: var(--pico-input-background-color);
+            border: 1px solid var(--pico-border-color);
+            border-radius: var(--pico-border-radius);
+        }
+        .test-controls button {
+            padding: 0.75rem 1.25rem;
+            font-size: 1rem;
+            flex-shrink: 0;
+            min-width: 100px;
+        }
+
+        /* Live Log Viewer Styling */
+        #log-output {
+            /* --- UPDATED: Using CSS Variables --- */
+            background-color: var(--log-viewer-bg);
+            color: var(--log-viewer-text);
+            border: 1px solid var(--pico-muted-border-color);
+            padding: 1.5rem;
+            height: 450px;
+            overflow-y: scroll;
+            border-radius: var(--pico-border-radius);
+            font-family: var(--pico-monospace-font-family);
+            font-size: 0.65rem;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        #log-output code {
+            font-size: inherit;
+            background: none;
+            color: inherit;
+            padding: 0;
+            border-radius: 0;
+        }
+        .log-pre {
+            margin-top: 1.5rem;
+        }
+        nav ul {
+            justify-content: center;
+        }
+
+        /* Responsive Adjustments */
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2rem;
+            }
+            header {
+                gap: 1rem;
+            }
+            header form {
+                flex-basis: 48%;
+                margin-right: 0 !important;
+            }
+            .test-controls form {
+                flex-direction: column;
+            }
+            .test-controls input[type="text"],
+            .test-controls button {
+                width: 100%;
+                min-width: unset;
+            }
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <header>
+            <h1>DynamoDB Control Tower</h1>
+            <form action="/control" method="post">
+                <input type="hidden" name="action" value="restart-all">
+                <button type="submit" class="contrast">Restart Full Cluster</button>
+            </form>
+            <form action="/control" method="post">
+                <input type="hidden" name="action" value="force-sync">
+                <button type="submit" class="secondary">Force Anti-Entropy Sync</button>
+            </form>
+        </header>
+
+        <section>
+            <h2>Cluster Overview</h2>
+            {{ if .Error }}
+                <article><p><strong>Error:</strong> {{ .Error }}</p></article>
+            {{ else }}
+                <div class="grid">
+                    {{ range .Nodes }}
+                    <article>
+                        <header class="card-header">
+                            <strong>{{ .ID }}</strong>
+                            <span class="status-badge {{ if .IsAlive }}status-alive{{ else }}status-down{{ end }}">
+                                {{ .Status }}
+                            </span>
+                        </header>
+                        <p>
+                            <small>
+                                Host: {{ .Host }}:{{ .Port }}<br>
+                                Heartbeat: {{ .Heartbeat }}
+                            </small>
+                        </p>
+                        <footer>
+                            <form action="/control" method="post">
+                                <input type="hidden" name="action" value="stop-node">
+                                <input type="hidden" name="node_id" value="{{ .ID }}">
+                                <button type="submit" class="contrast" {{ if not .IsAlive }}disabled{{ end }}>Stop Node</button>
+                            </form>
+                        </footer>
+                    </article>
+                    {{ end }}
+                </div>
+            {{ end }}
+        </section>
+
+        <section class="test-section">
+            <h2>Test Scenarios</h2>
+            <p>Use these buttons to run various test cases. Monitor the "Live Log Viewer" below for output and verification.</p>
+
+            <h3>1. Basic Operations</h3>
+            <p>Quickly PUT an auto-generated key-value pair, or specify your own. Then, GET any key.</p>
+            <div class="test-controls">
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="put-value">
+                    <button type="submit" class="secondary">PUT Auto-Generated Key-Value</button>
+                </form>
+            </div>
+            <div class="test-controls">
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="put-custom-value">
+                    <input type="text" name="custom_key" placeholder="Enter custom Key" aria-label="Custom Key" required>
+                    <input type="text" name="custom_value" placeholder="Enter custom Value" aria-label="Custom Value" required>
+                    <button type="submit">PUT Custom Key-Value</button>
+                </form>
+            </div>
+            <div class="test-controls">
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="get-value">
+                    <input type="text" name="test_key" placeholder="Enter Key to GET (e.g., my-custom-key)" aria-label="Key to GET" required>
+                    <button type="submit">GET Value</button>
+                </form>
+            </div>
+
+            <h3>2. Fault Tolerance (Sloppy Quorum & Hinted Handoff)</h3>
+            <p>
+                This sequence demonstrates writes/reads when a node (Node C) is down, and subsequent hinted handoff.
+                <strong>Expected keys for these tests:</strong>
+                <br> `fault-key`: <code id="faultKeyDisplay"></code>
+                <br> `hint-key`: <code id="hintKeyDisplay"></code>
+            </p>
+            <div class="test-controls">
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="stop-nodeC-nodeD">
+                    <button type="submit" onclick="setTimeout(() => { connectLog('nodeC'); connectLog('nodeD'); }, 1000);">Stop Node C & D (Partition)</button>
+                </form>
+                 <form action="/control" method="post">
+                    <input type="hidden" name="action" value="put-fault-key-nodeA">
+                    <button type="submit">PUT (fault-key) w/ Node C Down</button>
+                </form>
+                 <form action="/control" method="post">
+                    <input type="hidden" name="action" value="get-fault-key-nodeA">
+                    <button type="submit">GET (fault-key) w/ Node C Down</button>
+                </form>
+                 <form action="/control" method="post">
+                    <input type="hidden" name="action" value="put-hint-key-nodeA">
+                    <button type="submit">PUT (hint-key) w/ Node C Down</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="restart-all">
+                    <button type="submit" onclick="setTimeout(() => connectLog('nodeC'), 5000);">Restart Cluster</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="force-replicate-fault-key-nodeC">
+                    <button type="submit">Force Replicate Fault Key to Node C</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="get-fault-key-nodeC">
+                    <button type="submit">GET (fault-key) from Node C (Handoff Check)</button>
+                </form>
+            </div>
+
+            <h3>3. Conflict Resolution (Vector Clocks)</h3>
+            <p>
+                This sequence simulates a network partition, divergent writes, and subsequent resolution.
+                <strong>Expected key:</strong> `conflict-key`: <code id="conflictKeyDisplay"></code>
+            </p>
+            <div class="test-controls">
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="restart-all">
+                    <button type="submit">Restart Cluster (Clean Slate)</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="initial-put-conflict-key-nodeA">
+                    <button type="submit">Initial PUT (Version A)</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="stop-nodeC-nodeD">
+                    <button type="submit" onclick="setTimeout(() => { connectLog('nodeC'); connectLog('nodeD'); }, 1000);">Stop Node C & D (Partition)</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="put-conflict-key-nodeA">
+                    <button type="submit">PUT on Node A (Version A-updated)</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="put-conflict-key-nodeB">
+                    <button type="submit">PUT on Node B (Version B-updated)</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="restart-all">
+                    <button type="submit" onclick="setTimeout(() => { connectLog('nodeC'); connectLog('nodeD'); }, 5000);">Restart Cluster (Heal Partition)</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="force-sync">
+                    <button type="submit">Force Anti-Entropy Sync</button>
+                </form>
+                <form action="/control" method="post">
+                    <input type="hidden" name="action" value="get-conflict-key-all-nodes">
+                    <button type="submit">Verify Conflict Resolution (Check Logs)</button>
+                </form>
+            </div>
+        </section>
+
+        <section>
+            <h2>Live Log Viewer</h2>
+            <nav>
+                <ul>
+                    <li><button class="secondary outline" onclick="connectLog('nodeA')">Node A</button></li>
+                    <li><button class="secondary outline" onclick="connectLog('nodeB')">Node B</button></li>
+                    <li><button class="secondary outline" onclick="connectLog('nodeC')">Node C</button></li>
+                    <li><button class="secondary outline" onclick="connectLog('nodeD')">Node D</button></li>
+                </ul>
+            </nav>
+            <pre id="log-output" class="log-pre"><code>Click a node to view its logs...</code></pre>
+        </section>
+    </main>
+
+    <script>
+        // --- YOUR SCRIPT IS UNCHANGED ---
+        let currentSocket = null;
+        let currentConnectedNodeId = null;
+        const logOutput = document.getElementById('log-output');
+
+        let dynamicFaultKey = '';
+        let dynamicHintKey = '';
+        let dynamicConflictKey = '';
+
+        async function fetchDynamicKeys() {
+            try {
+                const response = await fetch('/admin/test-keys');
+                if (response.ok) {
+                    const keys = await response.json();
+                    dynamicFaultKey = keys.faultKey;
+                    dynamicHintKey = keys.hintKey;
+                    dynamicConflictKey = keys.conflictKey;
+
+                    document.getElementById('faultKeyDisplay').textContent = dynamicFaultKey;
+                    document.getElementById('hintKeyDisplay').textContent = dynamicHintKey;
+                    document.getElementById('conflictKeyDisplay').textContent = dynamicConflictKey;
+                    console.log('Dynamic keys fetched:', keys);
+                } else {
+                    console.error('Failed to fetch dynamic keys:', response.statusText);
+                    document.getElementById('faultKeyDisplay').textContent = 'fault-key-APP_START_TIMESTAMP';
+                    document.getElementById('hintKeyDisplay').textContent = 'hint-key-APP_START_TIMESTAMP+1';
+                    document.getElementById('conflictKeyDisplay').textContent = 'conflict-key-APP_START_TIMESTAMP+2';
+                }
+            } catch (error) {
+                console.error('Error fetching dynamic keys:', error);
+                document.getElementById('faultKeyDisplay').textContent = 'fault-key-APP_START_TIMESTAMP';
+                document.getElementById('hintKeyDisplay').textContent = 'hint-key-APP_START_TIMESTAMP+1';
+                document.getElementById('conflictKeyDisplay').textContent = 'conflict-key-APP_START_TIMESTAMP+2';
+            }
+        }
+
+        function connectLog(nodeId, retryCount = 0) {
+            if (currentSocket && currentConnectedNodeId === nodeId && currentSocket.readyState < 2) {
+                console.log(`Already connected to ${nodeId}.`);
+                return;
+            }
+            if (currentSocket) {
+                console.log(`Closing existing connection to ${currentConnectedNodeId}`);
+                currentSocket.close();
+            }
+
+            logOutput.innerHTML = `<code>Connecting to ${nodeId} logs...</code>\n`;
+            currentConnectedNodeId = nodeId;
+            
+            const wsUrl = `ws://${window.location.host}/ws/logs?node=${nodeId}`;
+            currentSocket = new WebSocket(wsUrl);
+
+            currentSocket.onopen = () => {
+                logOutput.innerHTML = `<code>Connected to ${nodeId} logs. Waiting for messages...</code>\n`;
+                retryCount = 0;
+            };
+
+            currentSocket.onmessage = (event) => {
+                if (logOutput.innerHTML.includes('Waiting for messages')) {
+                    logOutput.innerHTML = ''; // Clear initial message
+                }
+                logOutput.innerHTML += event.data.replace(/</g, "&lt;").replace(/>/g, "&gt;") + '\n';
+                logOutput.scrollTop = logOutput.scrollHeight;
+            };
+
+            currentSocket.onerror = (error) => {
+                console.error(`WebSocket error for ${nodeId}:`, error);
+                logOutput.innerHTML += `\n<code>Error connecting to ${nodeId} logs. Is the node running?</code>`;
+            };
+
+            currentSocket.onclose = (event) => {
+                console.log(`Connection to ${nodeId} closed:`, event);
+                logOutput.innerHTML += `\n<code>Connection to ${nodeId} logs closed. (Code: ${event.code})</code>`;
+                
+                if (event.code !== 1000 && retryCount < 5) {
+                    const delay = Math.pow(2, retryCount) * 1000;
+                    console.log(`Attempting to reconnect to ${nodeId} in ${delay / 1000} seconds...`);
+                    setTimeout(() => connectLog(nodeId, retryCount + 1), delay);
+                }
+            };
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchDynamicKeys();
+            connectLog('nodeA'); 
+        });
+    </script>
+</body>
+</html>

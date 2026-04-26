@@ -1,0 +1,913 @@
+{
+  "conflict-1745362343": {
+    "Value": "A",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.68848+05:30"
+  },
+  "conflict-key-1745361620": {
+    "Value": "Version A",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.697209+05:30"
+  },
+  "conflict-key-1745362655": {
+    "Value": "Version A",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.720055+05:30"
+  },
+  "conflict-key-1745363926": {
+    "Value": "Version B-updated",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2,
+        "nodeB": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.711959+05:30"
+  },
+  "conflict-key-1748989728": {
+    "Value": "Version B-updated",
+    "VectorClock": {
+      "Clock": {
+        "nodeB": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.685461+05:30"
+  },
+  "conflict-key-1748991245": {
+    "Value": "Version B-updated",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.685943+05:30"
+  },
+  "conflict-key-1748994663": {
+    "Value": "Version A",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.700881+05:30"
+  },
+  "conflict-key-1749000002": {
+    "Value": "Version A",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.701308+05:30"
+  },
+  "demo-key-1745362764": {
+    "Value": "hello-1745362764-v2",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.686349+05:30"
+  },
+  "fault-1745362343": {
+    "Value": "Fault tolerant",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.686809+05:30"
+  },
+  "fault-1745362764": {
+    "Value": "resilient",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.709143+05:30"
+  },
+  "fault-key-1745361541": {
+    "Value": "Fault tolerant",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.721954+05:30"
+  },
+  "fault-key-1745362580": {
+    "Value": "Fault tolerant",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.709649+05:30"
+  },
+  "fault-key-1745363851": {
+    "Value": "Fault tolerant",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.682849+05:30"
+  },
+  "fault-key-1748994588": {
+    "Value": "Fault tolerant",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.717946+05:30"
+  },
+  "fault-key-1749000000": {
+    "Value": "Fault tolerant",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.687279+05:30"
+  },
+  "hint-1745362343": {
+    "Value": "Hint",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.701761+05:30"
+  },
+  "hint-key-1745361543": {
+    "Value": "Hint test value",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.697652+05:30"
+  },
+  "hint-key-1745362582": {
+    "Value": "Hint test value",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.712382+05:30"
+  },
+  "hint-key-1745363853": {
+    "Value": "Hint test value",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.714547+05:30"
+  },
+  "hint-key-1748994590": {
+    "Value": "Hint test value",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.69673+05:30"
+  },
+  "key": {
+    "Value": "234",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:52.383829+05:30"
+  },
+  "perf-1": {
+    "Value": "v1",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.719667+05:30"
+  },
+  "perf-10": {
+    "Value": "v10",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.7151+05:30"
+  },
+  "perf-11": {
+    "Value": "v11",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.683247+05:30"
+  },
+  "perf-12": {
+    "Value": "v12",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.723632+05:30"
+  },
+  "perf-13": {
+    "Value": "v13",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.71281+05:30"
+  },
+  "perf-14": {
+    "Value": "v14",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.722382+05:30"
+  },
+  "perf-15": {
+    "Value": "v15",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.702246+05:30"
+  },
+  "perf-16": {
+    "Value": "v16",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.688945+05:30"
+  },
+  "perf-17": {
+    "Value": "v17",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.724122+05:30"
+  },
+  "perf-18": {
+    "Value": "v18",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.6814+05:30"
+  },
+  "perf-19": {
+    "Value": "v19",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.702734+05:30"
+  },
+  "perf-2": {
+    "Value": "v2",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.713274+05:30"
+  },
+  "perf-20": {
+    "Value": "v20",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.687676+05:30"
+  },
+  "perf-3": {
+    "Value": "v3",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.715529+05:30"
+  },
+  "perf-4": {
+    "Value": "v4",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.720518+05:30"
+  },
+  "perf-5": {
+    "Value": "v5",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.70661+05:30"
+  },
+  "perf-6": {
+    "Value": "v6",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.71601+05:30"
+  },
+  "perf-7": {
+    "Value": "v7",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.707109+05:30"
+  },
+  "perf-8": {
+    "Value": "v8",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.691604+05:30"
+  },
+  "perf-9": {
+    "Value": "v9",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.707664+05:30"
+  },
+  "perf-key-1": {
+    "Value": "perf-value-1",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.688117+05:30"
+  },
+  "perf-key-10": {
+    "Value": "perf-value-10",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.692074+05:30"
+  },
+  "perf-key-11": {
+    "Value": "perf-value-11",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.689379+05:30"
+  },
+  "perf-key-12": {
+    "Value": "perf-value-12",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.698167+05:30"
+  },
+  "perf-key-13": {
+    "Value": "perf-value-13",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.71839+05:30"
+  },
+  "perf-key-14": {
+    "Value": "perf-value-14",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.703188+05:30"
+  },
+  "perf-key-15": {
+    "Value": "perf-value-15",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.694174+05:30"
+  },
+  "perf-key-16": {
+    "Value": "perf-value-16",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.694676+05:30"
+  },
+  "perf-key-17": {
+    "Value": "perf-value-17",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.713686+05:30"
+  },
+  "perf-key-18": {
+    "Value": "perf-value-18",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.684942+05:30"
+  },
+  "perf-key-19": {
+    "Value": "perf-value-19",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.703649+05:30"
+  },
+  "perf-key-2": {
+    "Value": "perf-value-2",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.708216+05:30"
+  },
+  "perf-key-20": {
+    "Value": "perf-value-20",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.698754+05:30"
+  },
+  "perf-key-3": {
+    "Value": "perf-value-3",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.716435+05:30"
+  },
+  "perf-key-4": {
+    "Value": "perf-value-4",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.721099+05:30"
+  },
+  "perf-key-5": {
+    "Value": "perf-value-5",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.689816+05:30"
+  },
+  "perf-key-6": {
+    "Value": "perf-value-6",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.690229+05:30"
+  },
+  "perf-key-7": {
+    "Value": "perf-value-7",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.704512+05:30"
+  },
+  "perf-key-8": {
+    "Value": "perf-value-8",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 3
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.695325+05:30"
+  },
+  "perf-key-9": {
+    "Value": "perf-value-9",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.690636+05:30"
+  },
+  "sync-1745362343": {
+    "Value": "sync-val",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.721494+05:30"
+  },
+  "sync-test-1745361586": {
+    "Value": "Sync test value",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.69112+05:30"
+  },
+  "sync-test-1745362624": {
+    "Value": "Sync test value",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.718804+05:30"
+  },
+  "sync-test-1745363894": {
+    "Value": "Sync test value",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.705177+05:30"
+  },
+  "sync-test-1748994631": {
+    "Value": "Sync test value",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.710147+05:30"
+  },
+  "test-key-1745361532": {
+    "Value": "test-value-1745361532-updated",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.710577+05:30"
+  },
+  "test-key-1745362343": {
+    "Value": "test-value-1745362343-updated",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.699432+05:30"
+  },
+  "test-key-1745362571": {
+    "Value": "test-value-1745362571-updated",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.683679+05:30"
+  },
+  "test-key-1745363842": {
+    "Value": "test-value-1745363842-updated",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.722799+05:30"
+  },
+  "test-key-1748990041": {
+    "Value": "test-value-1748990041",
+    "VectorClock": {
+      "Clock": {
+        "nodeB": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.692544+05:30"
+  },
+  "test-key-1748991369": {
+    "Value": "test-value-1748991369",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.693014+05:30"
+  },
+  "test-key-1748991411": {
+    "Value": "test-value-1748991411",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.695867+05:30"
+  },
+  "test-key-1748994579": {
+    "Value": "test-value-1748994579-updated",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 2
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.714154+05:30"
+  },
+  "test-key-1749036431": {
+    "Value": "test-value-1749036431",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.684092+05:30"
+  },
+  "test-key-1749036477": {
+    "Value": "test-value-1749036477",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.684511+05:30"
+  },
+  "test-key-1749036833": {
+    "Value": "test-value-1749036833",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.705697+05:30"
+  },
+  "test-key-1749036836": {
+    "Value": "test-value-1749036836",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.716989+05:30"
+  },
+  "test-key-1749036914": {
+    "Value": "test-value-1749036914",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.708661+05:30"
+  },
+  "test-key-1749036935": {
+    "Value": "test-value-1749036935",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.717525+05:30"
+  },
+  "test-key-1749037041": {
+    "Value": "test-value-1749037041",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.699885+05:30"
+  },
+  "test-key-1749037277": {
+    "Value": "test-value-1749037277",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.719265+05:30"
+  },
+  "test-key-1749037715": {
+    "Value": "test-value-1749037715",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.700283+05:30"
+  },
+  "test-key-1749037728": {
+    "Value": "test-value-1749037728",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.710959+05:30"
+  },
+  "test-key-1749038025": {
+    "Value": "test-value-1749038025",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.681938+05:30"
+  },
+  "test-key-1749038888": {
+    "Value": "test-value-1749038888",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.723268+05:30"
+  },
+  "test-key-1749039293": {
+    "Value": "test-value-1749039293",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.706154+05:30"
+  },
+  "test-key-1749039521": {
+    "Value": "test-value-1749039521",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.711465+05:30"
+  },
+  "test-key-1749042408": {
+    "Value": "test-value-1749042408",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.696324+05:30"
+  },
+  "value": {
+    "Value": "hello",
+    "VectorClock": {
+      "Clock": {
+        "nodeA": 1
+      }
+    },
+    "Conflicts": null,
+    "Timestamp": "2025-06-05T04:33:51.682403+05:30"
+  }
+}

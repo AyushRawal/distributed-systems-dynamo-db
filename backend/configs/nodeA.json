@@ -1,0 +1,18 @@
+{
+  "node_id": "nodeA",
+  "host": "localhost",
+  "port": 5000,
+  "peers": [ {"node_id":"nodeB","host":"localhost","port":5001},{"node_id":"nodeC","host":"localhost","port":5002},{"node_id":"nodeD","host":"localhost","port":5003} ],
+  "replication_factor": 3,
+  "read_quorum": 2,
+  "write_quorum": 2,
+  "gossip_interval_ms": 1000,
+  "failure_check_interval_ms": 2000,
+  "gossip_timeout_ms": 1000,
+  "anti_entropy_interval_ms": 30000,
+  "gossip_fanout": 2,
+  "gossip_retries": 3,
+  "gossip_retry_backoff_ms": 500,
+  "failure_timeout_ms": 10000,
+  "suspicion_timeout_ms": 5000
+}
