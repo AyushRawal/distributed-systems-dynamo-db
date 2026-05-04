@@ -1,7 +1,26 @@
 backend/dynamo-db
 admin-dashboard/control-tower
 
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.out
+
 backend/logs/*.log
 backend/logs/*.pid
 backend/logs/*.txt
 backend/data/*.json
+
+.venv/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.tmp
+*.bak

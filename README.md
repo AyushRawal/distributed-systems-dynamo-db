@@ -1,198 +1,193 @@
 # DistributedSystems-DynamoDB
 
-A simplified implementation inspired by Amazon's [Dynamo](https://www.amazon.com), built in Go. This project demonstrates core principles of distributed systems:
+This repository contains a Dynamo-inspired distributed key-value store implemented in Go, along with a small admin dashboard.
 
-* **Consistent hashing** for even key distribution
-* **Data replication** with configurable read/write quorum (R/W)
-* **Sloppy quorum** & **hinted handoff** for high availability
-* **Vector clocks** for conflict detection and resolution
-* **Merkle trees** and **anti-entropy** for replica synchronization
-* **Gossip protocol** for decentralized membership and failure detection
+Implemented features:
+- consistent hashing
+- replication with quorum-based reads and writes
+- gossip-based membership and failure detection
+- vector clocks for version tracking
+- hinted handoff and sloppy quorum
+- Merkle-tree support and anti-entropy sync logic
 
----
+## Prerequisites
 
-## ✨ Features
+Install these system tools before running the project:
+- Go 1.18 or newer
+- bash
+- curl
+- lsof
+- pkill
 
-* ⚡ **High availability**: serves reads/writes even when nodes fail
-* 📈 **Scalability**: add or remove nodes without full rehash
-* ⟳ **Conflict resolution**: causal ordering via vector clocks
-* 🩺 **Self‑healing**: hinted handoff + periodic anti‑entropy
-* 📊 **Monitoring**: built‑in stats & admin HTTP endpoints
+Only for the optional benchmark:
+- Python 3
 
----
+The project was validated on Linux.
 
-## 🧱 Architecture Overview
+## Repository Layout
 
+```text
+DistributedSystems-DynamoDB/
+├── setup.sh                  # one-time dependency setup
+├── backend/                  # distributed key-value store
+│   ├── run_cluster.sh        # starts/stops the 4-node cluster
+│   ├── test_dynamo.sh        # end-to-end integration test suite
+│   ├── benchmark.py          # optional benchmark tool
+│   └── requirements.txt      # Python packages for benchmarking
+└── admin-dashboard/          # browser-based cluster dashboard
 ```
-Client ↔ Coordinator ↔ Consistent Hash Ring ↔ N Replicas
- ├─ Gossip Service (membership)
- ├─ Anti‑Entropy (Merkle trees)
- └─ Hint Store (sloppy writes)
-```
 
----
+## One-Time Setup
 
-## ⚙️ Prerequisites
-
-* Go 1.18+
-* bash, curl
-* Python 3+ (for benchmarking)
-* pip (for Python dependencies)
-
----
-
-## 🚀 Getting Started
-
-### Local Build & Run
-
-Navigate to the backend directory:
+From the repository root, run:
 
 ```bash
-cd distributed-dynamo-system/backend
+bash setup.sh
 ```
 
-Install Go dependencies and build the DynamoDB executable:
+What `setup.sh` does:
+- checks for required commands
+- downloads Go module dependencies for `backend` and `admin-dashboard`
+- builds both Go modules
+- runs backend unit tests
+
+Default setup does not install benchmark dependencies.
+
+To also install the optional Python packages used by `backend/benchmark.py`, run:
 
 ```bash
-go mod tidy
-go build -o dynamoDB .
+bash setup.sh --with-benchmark
 ```
 
-### Configure Nodes
+## Running the Backend Cluster
 
-Edit `configs/*.json` files as needed (replication factor, quorum, peers).
-
-### Start All Nodes
-
-Start each node in a separate shell:
+From the repository root:
 
 ```bash
-./dynamoDB -config configs/nodeA.json &
-./dynamoDB -config configs/nodeB.json &
-./dynamoDB -config configs/nodeC.json &
-./dynamoDB -config configs/nodeD.json &
-```
-
-Or use the helper script:
-
-```bash
+cd backend
 ./run_cluster.sh
 ```
 
----
+This starts 4 local nodes on:
+- `nodeA` -> `localhost:5000`
+- `nodeB` -> `localhost:5001`
+- `nodeC` -> `localhost:5002`
+- `nodeD` -> `localhost:5003`
 
-## 🖥️ Running the Admin Dashboard UI
+Notes:
+- `run_cluster.sh` regenerates `backend/configs/nodeA.json` through `nodeD.json` each time it starts the cluster.
+- Runtime logs are written under `backend/logs/`.
+- Persistent local snapshots are written under `backend/data/`.
 
-In a new terminal, navigate to the admin dashboard directory:
+## Running the Admin Dashboard
+
+Open a second terminal from the repository root:
 
 ```bash
-cd distributed-dynamo-system/admin-dashboard
-```
-
-Install Go dependencies and run the UI:
-
-```bash
-go mod tidy
+cd admin-dashboard
 go run main.go
 ```
 
-Then open [http://localhost:8080](http://localhost:8080) in your browser.
+Then visit:
 
----
+```text
+http://localhost:8080
+```
 
-## 🧺 Usage Examples
+## Verifying the System
+
+### Run the automated integration test suite
+
+From the repository root:
 
 ```bash
-# Write data
-echo '{"value":"hello"}' | curl -X PUT http://localhost:5000/kv/mykey -H 'Content-Type: application/json'
+cd backend
+bash test_dynamo.sh
+```
 
-# Read data
+The test suite covers:
+- basic PUT/GET
+- vector clock behavior
+- sloppy quorum during node failure
+- hinted handoff
+- anti-entropy sync
+- conflict handling after partition-like scenarios
+
+### Run Go unit tests manually
+
+From the repository root:
+
+```bash
+cd backend
+go test ./...
+```
+
+## API Usage
+
+With the cluster running, send requests to any node. `nodeA` on port `5000` is the default coordinator in the examples below.
+
+### Store a value
+
+```bash
+curl -X PUT http://localhost:5000/kv/mykey \
+  -H 'Content-Type: application/json' \
+  -d '{"value":"hello"}'
+```
+
+### Read a value
+
+```bash
 curl http://localhost:5000/kv/mykey
-
-# Delete data
-curl -X DELETE http://localhost:5000/kv/mykey
-
-# View node statistics
-curl http://localhost:5000/stats
 ```
 
----
-
-## ✅ Testing & Validation
-
-From the `distributed-dynamo-system/backend` directory:
+### Cluster status
 
 ```bash
-chmod +x test_dynamo.sh
-./test_dynamo.sh
+curl http://localhost:5000/admin/cluster
 ```
 
----
-
-## 📊 Benchmarking
-
-From the `distributed-dynamo-system/backend` directory:
+### Force an anti-entropy sync
 
 ```bash
-pip install -r requirements.txt
-python3 benchmark.py --type mixed --operations 1000 --workers 8 --read-pct 80 --plot --output bench_report
+curl -X POST http://localhost:5000/admin/sync \
+  -H 'Content-Type: application/json' \
+  -d '{}'
 ```
 
----
+## Optional Benchmark
 
-## 🗂️ Project Structure
+The benchmark tool is optional and is not required to run the key-value store.
 
-```
-distributed-dynamo-system/
-├── backend/                  # Core distributed key-value store
-│   ├── configs/              # Node configurations (nodeA.json, nodeB.json, etc.)
-│   ├── data/                 # Persistence storage (optional)
-│   ├── logs/                 # Runtime logs
-│   ├── benchmark.py          # Performance analyzer
-│   ├── check_cluster.sh      # Cluster health check script
-│   ├── config.go             # Configuration parsing
-│   ├── consistent_hash.go    # Consistent hashing implementation
-│   ├── gossip.go             # Gossip protocol
-│   ├── main.go               # Node entry point
-│   ├── merkle_tree.go        # Merkle tree implementation (anti-entropy)
-│   ├── node.go               # Core node operations (coordinator logic)
-│   ├── node_persist.go       # Disk persistence
-│   ├── run_cluster.sh        # Cluster management script
-│   ├── stats.go              # Metrics collection
-│   ├── test_dynamo.sh        # Functional test suite
-│   ├── vector_clock.go       # Vector clock implementation
-│   ├── go.mod                # Dependency management
-│   └── go.sum                # Dependency checksums
-└── admin-dashboard/          # Cluster monitoring UI
-    ├── templates/            # HTML templates
-    │   └── index.gohtml      # Main dashboard template
-    ├── main.go               # UI server entry point
-    ├── go.mod                # UI dependencies
-    └── go.sum                # UI dependency checksums
+Install the benchmark dependencies first:
+
+```bash
+bash setup.sh --with-benchmark
 ```
 
----
+If a virtual environment was created, activate it first:
 
-## 📡 Monitoring Endpoints
+```bash
+source .venv/bin/activate
+```
 
-Access these while nodes are running (replace `<node-port>` with actual port):
+Then run the benchmark from the repository root:
 
-* `http://localhost:<node-port>/stats`
-  → Node metrics (requests, latency, errors)
+```bash
+cd backend
+python3 benchmark.py --type mixed --operations 1000 --workers 8 --read-pct 80
+```
 
-* `http://localhost:<node-port>/ring`
-  → Hash ring status (nodes, partitions)
+## Stopping the System
 
-* `http://localhost:<node-port>/gossip`
-  → Membership information (live/dead nodes)
+From the repository root:
 
-* `http://localhost:<node-port>/merkle`
-  → Merkle tree status (anti-entropy progress)
+```bash
+cd backend
+./run_cluster.sh stop
+```
 
----
+## Troubleshooting
 
-## 📬 Contact
-
-Feel free to contribute or raise issues if you find bugs or improvements!
-Maintainer: *\[Nikhil Singh]*
-License: MIT
+- If ports `5000`-`5003` are already in use, stop the existing processes before starting the cluster.
+- If the dashboard does not load, make sure the backend cluster is already running.
+- If benchmark commands fail, run `bash setup.sh --with-benchmark` to install or recreate the optional Python environment.
