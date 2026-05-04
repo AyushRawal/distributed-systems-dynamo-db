@@ -2,6 +2,8 @@
 
 This repository contains a Dynamo-inspired distributed key-value store implemented in Go, along with a small admin dashboard.
 
+Public client and admin APIs stay on HTTP. Internal node-to-node traffic uses gRPC on separate ports.
+
 Implemented features:
 - consistent hashing
 - replication with quorum-based reads and writes
@@ -13,7 +15,7 @@ Implemented features:
 ## Prerequisites
 
 Install these system tools before running the project:
-- Go 1.18 or newer
+- Go 1.23 or newer
 - bash
 - curl
 - lsof
@@ -31,6 +33,7 @@ DistributedSystems-DynamoDB/
 ├── setup.sh                  # one-time dependency setup
 ├── backend/                  # distributed key-value store
 │   ├── run_cluster.sh        # starts/stops the 4-node cluster
+│   ├── proto/                # internal gRPC service definitions and generated stubs
 │   ├── test_dynamo.sh        # end-to-end integration test suite
 │   ├── benchmark.py          # optional benchmark tool
 │   └── requirements.txt      # Python packages for benchmarking
@@ -69,10 +72,16 @@ cd backend
 ```
 
 This starts 4 local nodes on:
-- `nodeA` -> `localhost:5000`
-- `nodeB` -> `localhost:5001`
-- `nodeC` -> `localhost:5002`
-- `nodeD` -> `localhost:5003`
+- HTTP/public/admin:
+  - `nodeA` -> `localhost:5000`
+  - `nodeB` -> `localhost:5001`
+  - `nodeC` -> `localhost:5002`
+  - `nodeD` -> `localhost:5003`
+- Internal gRPC:
+  - `nodeA` -> `localhost:6000`
+  - `nodeB` -> `localhost:6001`
+  - `nodeC` -> `localhost:6002`
+  - `nodeD` -> `localhost:6003`
 
 Notes:
 - `run_cluster.sh` regenerates `backend/configs/nodeA.json` through `nodeD.json` each time it starts the cluster.
@@ -111,6 +120,7 @@ The test suite covers:
 - sloppy quorum during node failure
 - hinted handoff
 - Merkle-based anti-entropy sync
+- internal gRPC transport during replica coordination
 - conflict handling after partition-like scenarios
 
 ### Run Go unit tests manually
@@ -191,5 +201,6 @@ cd backend
 ## Troubleshooting
 
 - If ports `5000`-`5003` are already in use, stop the existing processes before starting the cluster.
+- If internal transport ports `6000`-`6003` are already in use, stop the existing processes before starting the cluster.
 - If the dashboard does not load, make sure the backend cluster is already running.
 - If benchmark commands fail, run `bash setup.sh --with-benchmark` to install or recreate the optional Python environment.

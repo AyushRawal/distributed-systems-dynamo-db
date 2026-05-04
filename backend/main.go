@@ -45,6 +45,30 @@ func getPortForNode(nodeID string) int {
 	}
 }
 
+func getGRPCPortForNode(nodeID string) int {
+	switch nodeID {
+	case "nodeA":
+		return 6000
+	case "nodeB":
+		return 6001
+	case "nodeC":
+		return 6002
+	case "nodeD":
+		return 6003
+	default:
+		parts := strings.Split(nodeID, "node")
+		if len(parts) == 2 {
+			suffix := parts[1]
+			if offset, err := strconv.Atoi(suffix); err == nil {
+				return 6000 + offset
+			}
+		}
+
+		h := int(hashKey(nodeID) % 1000)
+		return 6000 + h
+	}
+}
+
 func main() {
 	// Parse command line flags
 	configFile := flag.String("config", "", "Path to configuration file")
@@ -80,15 +104,17 @@ func main() {
 			if len(parts) >= 2 {
 				peerPort, _ := strconv.Atoi(parts[1])
 				peers = append(peers, PeerConfig{
-					NodeID: parts[0],
-					Host:   "localhost",
-					Port:   peerPort,
+					NodeID:   parts[0],
+					Host:     "localhost",
+					Port:     peerPort,
+					GRPCPort: getGRPCPortForNode(parts[0]),
 				})
 			} else if len(parts) == 1 {
 				peers = append(peers, PeerConfig{
-					NodeID: parts[0],
-					Host:   "localhost",
-					Port:   getPortForNode(parts[0]),
+					NodeID:   parts[0],
+					Host:     "localhost",
+					Port:     getPortForNode(parts[0]),
+					GRPCPort: getGRPCPortForNode(parts[0]),
 				})
 			}
 		}
@@ -97,6 +123,7 @@ func main() {
 			NodeID:               nodeID,
 			Host:                 "localhost",
 			Port:                 port,
+			GRPCPort:             getGRPCPortForNode(nodeID),
 			Peers:                peers,
 			ReplicationFactor:    3,
 			ReadQuorum:           2,
@@ -145,6 +172,7 @@ func main() {
 
 	// Start anti-entropy process with a faster interval for testing
 	go coordinator.startAntiEntropy(5 * time.Second)
+	startGRPCServer(config, coordinator)
 
 	// Setup HTTP server
 	r := mux.NewRouter()
@@ -166,7 +194,7 @@ func main() {
 	r.HandleFunc("/admin/sync", ForceSyncHandler).Methods("POST")
 
 	addr := fmt.Sprintf(":%d", config.Port)
-	log.Printf("Node %s starting on port %d...", config.NodeID, config.Port)
+	log.Printf("Node %s starting HTTP server on port %d...", config.NodeID, config.Port)
 	log.Fatal(http.ListenAndServe(addr, r))
 }
 
@@ -296,10 +324,19 @@ func InternalGetHandler(w http.ResponseWriter, r *http.Request) {
 	key := vars["key"]
 
 	value := coordinator.localGet(key)
+	if value.Value == nil {
+		http.Error(w, "Key not found", http.StatusNotFound)
+		return
+	}
+
+	vectorClock := map[string]int{}
+	if value.VectorClock != nil {
+		vectorClock = value.VectorClock.Clock
+	}
 
 	resp := map[string]interface{}{
 		"value":        value.Value,
-		"vector_clock": value.VectorClock.Clock,
+		"vector_clock": vectorClock,
 		"timestamp":    value.Timestamp.Format(time.RFC3339),
 	}
 
@@ -369,22 +406,15 @@ func InternalPutHandler(w http.ResponseWriter, r *http.Request) {
 	originNode := "unknown"
 	if origin, ok := body["origin_node"].(string); ok {
 		originNode = origin
-		textLog(coordinator.NodeID, "INTERNAL", "Request from origin node: %s", originNode)
 	}
 
-	// For any special case, bypass vector clock checks
-	if isForceSync || isHint || isForceKey {
-		incoming.Value = value
-		coordinator.storeReplicaValue(key, incoming)
-		textLog(coordinator.NodeID, "INTERNAL", "Force stored key %s from node %s", key, originNode)
-	} else {
-		// Normal put with vector clock comparison
-		coordinator.localPut(key, value, incoming.VectorClock)
-	}
-
-	// Log the operation
-	textLog(coordinator.NodeID, "INTERNAL", "Internal PUT completed for key %s with vector clock %v",
-		key, incoming.VectorClock.Clock)
+	incoming.Value = value
+	coordinator.applyReplicaWrite(key, incoming, replicaWriteOptions{
+		ForceSync:  isForceSync,
+		ForceKey:   isForceKey,
+		IsHint:     isHint,
+		OriginNode: originNode,
+	})
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
@@ -524,9 +554,7 @@ func RepairHandler(w http.ResponseWriter, r *http.Request) {
 
 	sv := parseStoredValue(body)
 	sv.Value = value
-	coordinator.storeReplicaValue(key, sv)
-
-	textLog(coordinator.NodeID, "REPAIR", "Repaired key %s with value and %d conflicts", key, len(sv.Conflicts))
+	coordinator.applyRepair(key, sv)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))

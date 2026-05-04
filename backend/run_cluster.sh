@@ -29,6 +29,7 @@ curlx() {
 # ────────────────────────────  constants  ────────────────────────────
 NODES=(nodeA nodeB nodeC nodeD)
 PORTS=(5000 5001 5002 5003)
+GRPC_PORTS=(6000 6001 6002 6003)
 LOG_DIR="logs"
 CFG_DIR="configs"
 mkdir -p "$LOG_DIR" "$CFG_DIR"
@@ -36,14 +37,14 @@ mkdir -p "$LOG_DIR" "$CFG_DIR"
 # ──────────────────────────  stop_cluster  ───────────────────────────
 stop_cluster() {
   step "Stopping any running nodes…"
-  for port in "${PORTS[@]}"; do
+  for port in "${PORTS[@]}" "${GRPC_PORTS[@]}"; do
     if pid=$(lsof -t -i:"$port" 2>/dev/null); then
       info "Stopping process on port $port (PID $pid)"
       kill "$pid" 2>/dev/null || true
     fi
   done
   sleep 2
-  for port in "${PORTS[@]}"; do
+  for port in "${PORTS[@]}" "${GRPC_PORTS[@]}"; do
     if pid=$(lsof -t -i:"$port" 2>/dev/null); then
       warn "Force‑killing stubborn process on port $port (PID $pid)"
       kill -9 "$pid" 2>/dev/null || true
@@ -59,10 +60,11 @@ generate_configs() {
   for i in "${!NODES[@]}"; do
     node=${NODES[$i]}
     port=${PORTS[$i]}
+    grpc_port=${GRPC_PORTS[$i]}
     peers=()
     for j in "${!NODES[@]}"; do
       [[ $i == $j ]] && continue
-      peers+=( "{\"node_id\":\"${NODES[$j]}\",\"host\":\"localhost\",\"port\":${PORTS[$j]}}" )
+      peers+=( "{\"node_id\":\"${NODES[$j]}\",\"host\":\"localhost\",\"port\":${PORTS[$j]},\"grpc_port\":${GRPC_PORTS[$j]}}" )
     done
     peers_json=$(IFS=,; echo "${peers[*]}")
 
@@ -71,6 +73,7 @@ generate_configs() {
   "node_id": "$node",
   "host": "localhost",
   "port": $port,
+  "grpc_port": $grpc_port,
   "peers": [ $peers_json ],
   "replication_factor": 3,
   "read_quorum": 2,
@@ -104,10 +107,10 @@ start_cluster() {
     info "Launching $node on :$port"
     # Build a dedicated binary to avoid 'go run' including *_test.go files.
     mkdir -p bin
-    go build -o bin/node ./... > /dev/null 2>&1 || {
+    go build -o bin/node . > /dev/null 2>&1 || {
       error "go build failed; see build output"
       # capture build output to the node log for easier debugging
-      go build -o bin/node ./... >"$LOG_DIR/${node}.log" 2>&1 || true
+      go build -o bin/node . >"$LOG_DIR/${node}.log" 2>&1 || true
     }
     ./bin/node -config="$cfg" >"$LOG_DIR/$node.log" 2>&1 &
     pid=$!

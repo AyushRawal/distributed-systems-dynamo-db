@@ -1,11 +1,11 @@
 package main
 
 import (
-	"encoding/json"
-	"net/http"
-	"strings"
+	"context"
 	"testing"
 	"time"
+
+	internalpb "dynamo-db/proto"
 )
 
 func TestBuildMerkleTreeForBucketIncludesVectorClockState(t *testing.T) {
@@ -50,33 +50,28 @@ func TestPerformMerkleSyncWithNodeRepairsOnlyDifferingKey(t *testing.T) {
 	merkleHits := 0
 	internalGetHits := 0
 	repairHits := 0
-	repairBody := make(chan map[string]interface{}, 1)
+	repairBody := make(chan storedValue, 1)
 
-	startMockNodeServer(t, targetNodeID, func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasPrefix(r.URL.Path, "/internal/merkle/"):
+	startMockNodeServer(t, targetNodeID, &mockInternalServiceServer{
+		getMerkleBucket: func(ctx context.Context, req *internalpb.GetMerkleBucketRequest) (*internalpb.MerkleTreeResponse, error) {
 			merkleHits++
-			payload, err := json.Marshal(NewMerkleTree(map[string]interface{}{}).SerializeToMap())
-			if err != nil {
-				t.Fatalf("failed to marshal Merkle response: %v", err)
+			return merkleTreeToProto(NewMerkleTree(map[string]interface{}{})), nil
+		},
+		getLocal: func(ctx context.Context, req *internalpb.GetLocalRequest) (*internalpb.GetLocalResponse, error) {
+			if req.Key != key {
+				t.Fatalf("expected key %s, got %s", key, req.Key)
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write(payload)
-		case r.Method == http.MethodGet && r.URL.Path == "/internal/kv/"+key:
 			internalGetHits++
-			http.NotFound(w, r)
-		case r.Method == http.MethodPut && r.URL.Path == "/internal/repair/"+key:
-			repairHits++
-			defer r.Body.Close()
-			var body map[string]interface{}
-			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-				t.Fatalf("failed to decode repair request: %v", err)
+			return &internalpb.GetLocalResponse{Found: false}, nil
+		},
+		repairKey: func(ctx context.Context, req *internalpb.RepairKeyRequest) (*internalpb.OperationStatus, error) {
+			if req.Key != key {
+				t.Fatalf("expected repair key %s, got %s", key, req.Key)
 			}
-			repairBody <- body
-			w.WriteHeader(http.StatusOK)
-		default:
-			http.NotFound(w, r)
-		}
+			repairHits++
+			repairBody <- protoToStoredValue(req.Value)
+			return &internalpb.OperationStatus{Ok: true, Message: "OK"}, nil
+		},
 	})
 
 	c.performMerkleSyncWithNode(targetNodeID)
@@ -92,11 +87,10 @@ func TestPerformMerkleSyncWithNodeRepairsOnlyDifferingKey(t *testing.T) {
 	}
 
 	body := <-repairBody
-	if body["value"] != "local-value" {
-		t.Fatalf("expected repaired value local-value, got %v", body["value"])
+	if body.Value != "local-value" {
+		t.Fatalf("expected repaired value local-value, got %v", body.Value)
 	}
-	vc := body["vector_clock"].(map[string]interface{})
-	if got := int(vc["nodeA"].(float64)); got != 2 {
+	if got := body.VectorClock.Clock["nodeA"]; got != 2 {
 		t.Fatalf("expected repaired vector clock nodeA=2, got %d", got)
 	}
 }

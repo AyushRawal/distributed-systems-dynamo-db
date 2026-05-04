@@ -1,18 +1,20 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"math"
-	"net/http"
 	"os"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	internalpb "dynamo-db/proto"
+	"google.golang.org/grpc"
 )
 
 const (
@@ -55,6 +57,13 @@ type Coordinator struct {
 	*Node
 	ReadQuorum  int
 	WriteQuorum int
+}
+
+type replicaWriteOptions struct {
+	ForceSync  bool
+	ForceKey   bool
+	IsHint     bool
+	OriginNode string
 }
 
 func NewNode(nodeID string, ring *ConsistentHashRing, replication int) *Node {
@@ -282,39 +291,40 @@ func (c *Coordinator) remotePutWithRetry(nodeID, key string, value interface{}, 
 
 // Fix the remotePut method to handle nil vector clocks and add more robust error handling
 func (c *Coordinator) remotePut(nodeID, key string, value interface{}, vc *VectorClock) bool {
-	// Safety check for nil vector clock
 	if vc == nil {
 		vc = NewVectorClock()
-		vc.Increment(c.NodeID) // Initialize with current node
+		vc.Increment(c.NodeID)
 	}
 
-	url := fmt.Sprintf("http://%s:%d/internal/kv/%s",
-		getHost(nodeID), getPortForNode(nodeID), key)
-
-	body := map[string]interface{}{
-		"value":        value,
-		"vector_clock": vc.Clock,
-		"timestamp":    time.Now().Format(time.RFC3339),
-	}
-
-	bodyBytes, _ := json.Marshal(body)
-	req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
+	client, err := getInternalServiceClient(nodeID)
 	if err != nil {
-		textLog(c.NodeID, "ERROR", "Failed to create request for %s: %v", url, err)
+		textLog(c.NodeID, "ERROR", "Failed to create gRPC client for %s: %v", nodeID, err)
 		return false
 	}
 
-	req.Header.Set("Content-Type", "application/json")
-
-	client := &http.Client{Timeout: 5 * time.Second} // Increase timeout for better reliability
-	resp, err := client.Do(req)
+	protoValue, err := storedValueToProto(storedValue{
+		Value:       value,
+		VectorClock: vc,
+		Timestamp:   time.Now(),
+	})
 	if err != nil {
-		textLog(c.NodeID, "ERROR", "PUT failed to %s: %v", nodeID, err)
+		textLog(c.NodeID, "ERROR", "Failed to encode PUT payload for %s: %v", nodeID, err)
 		return false
 	}
-	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.PutLocal(ctx, &internalpb.PutLocalRequest{
+		Key:   key,
+		Value: protoValue,
+	}, grpc.WaitForReady(true))
+	if err != nil {
+		textLog(c.NodeID, "ERROR", "gRPC PUT failed to %s: %v", nodeID, err)
+		return false
+	}
+
+	return resp.Ok
 }
 
 // Fix for localPut to handle vector clocks correctly
@@ -448,28 +458,25 @@ func (c *Coordinator) remoteGetWithRetry(nodeID, key string) storedValue {
 }
 
 func (c *Coordinator) remoteGet(nodeID, key string) storedValue {
-	url := fmt.Sprintf("http://%s:%d/internal/kv/%s",
-		getHost(nodeID), getPortForNode(nodeID), key)
+	client, err := getInternalServiceClient(nodeID)
+	if err != nil {
+		log.Printf("GET client failed for %s: %v", nodeID, err)
+		return storedValue{}
+	}
 
-	req, _ := http.NewRequest("GET", url, nil)
-	client := &http.Client{Timeout: requestTimeout}
-	resp, err := client.Do(req)
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
+
+	resp, err := client.GetLocal(ctx, &internalpb.GetLocalRequest{Key: key}, grpc.WaitForReady(true))
 	if err != nil {
 		log.Printf("GET failed from %s: %v", nodeID, err)
 		return storedValue{}
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
+	if !resp.Found || resp.Value == nil {
 		return storedValue{}
 	}
 
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return storedValue{}
-	}
-
-	return parseStoredValue(result)
+	return protoToStoredValue(resp.Value)
 }
 
 func (c *Coordinator) localGet(key string) storedValue {
@@ -554,31 +561,20 @@ func (c *Coordinator) fetchMerkleTree(nodeID string, bucket int) (*MerkleTree, e
 		return c.buildMerkleTreeForBucket(bucket), nil
 	}
 
-	url := fmt.Sprintf("http://%s:%d/internal/merkle/%d",
-		getHost(nodeID), getPortForNode(nodeID), bucket)
-
-	req, err := http.NewRequest("GET", url, nil)
+	client, err := getInternalServiceClient(nodeID)
 	if err != nil {
 		return nil, err
 	}
 
-	client := &http.Client{Timeout: requestTimeout}
-	resp, err := client.Do(req)
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
+
+	resp, err := client.GetMerkleBucket(ctx, &internalpb.GetMerkleBucketRequest{Bucket: int32(bucket)}, grpc.WaitForReady(true))
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
-	}
-
-	var payload map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return nil, err
-	}
-
-	return DeserializeFromMap(payload)
+	return protoToMerkleTree(resp), nil
 }
 
 func parseVectorClockFromPayload(data interface{}) *VectorClock {
@@ -698,42 +694,25 @@ func (c *Coordinator) performReadRepairs(nodes []string, key string, latest stor
 }
 
 func (c *Coordinator) repairNode(nodeID, key string, value storedValue) {
-	url := fmt.Sprintf("http://%s:%d/internal/repair/%s",
-		getHost(nodeID), getPortForNode(nodeID), key)
-
-	body := map[string]interface{}{
-		"value":        value.Value,
-		"vector_clock": value.VectorClock.Clock,
-		"timestamp":    value.Timestamp.Format(time.RFC3339),
+	client, err := getInternalServiceClient(nodeID)
+	if err != nil {
+		return
 	}
 
-	if len(value.Conflicts) > 0 {
-		var conflicts []map[string]interface{}
-		for _, c := range value.Conflicts {
-			conflicts = append(conflicts, map[string]interface{}{
-				"value":        c.Value,
-				"vector_clock": c.VectorClock.Clock,
-				"timestamp":    c.Timestamp.Format(time.RFC3339),
-			})
-		}
-		body["conflicts"] = conflicts
+	protoValue, err := storedValueToProto(value)
+	if err != nil {
+		return
 	}
 
-	bodyBytes, _ := json.Marshal(body)
-	req, _ := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
-	req.Header.Set("Content-Type", "application/json")
+	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
+	defer cancel()
 
-	client := &http.Client{Timeout: requestTimeout}
-	resp, err := client.Do(req)
-	if err == nil && resp.StatusCode == http.StatusOK {
+	resp, err := client.RepairKey(ctx, &internalpb.RepairKeyRequest{Key: key, Value: protoValue}, grpc.WaitForReady(true))
+	if err == nil && resp.Ok {
 		c.Stats.mu.Lock()
 		c.Stats.ReadRepairCount++
 		c.Stats.ConflictsResolved++
 		c.Stats.mu.Unlock()
-
-		if resp.Body != nil {
-			resp.Body.Close()
-		}
 	}
 }
 
@@ -760,6 +739,34 @@ func (c *Coordinator) storeReplicaValue(key string, value storedValue) {
 
 	c.DataStore[key] = cloneStoredValue(value)
 	c.saveData()
+}
+
+func (c *Coordinator) applyReplicaWrite(key string, incoming storedValue, opts replicaWriteOptions) {
+	if incoming.VectorClock == nil || len(incoming.VectorClock.Clock) == 0 {
+		incoming.VectorClock = NewVectorClock()
+		incoming.VectorClock.Increment(c.NodeID)
+	}
+
+	if opts.OriginNode != "" {
+		textLog(c.NodeID, "INTERNAL", "Request from origin node: %s", opts.OriginNode)
+	}
+	if opts.ForceKey {
+		textLog(c.NodeID, "TEST_FIX", "Received force key request for %s", key)
+	}
+
+	if opts.ForceSync || opts.IsHint || opts.ForceKey {
+		c.storeReplicaValue(key, incoming)
+		textLog(c.NodeID, "INTERNAL", "Force stored key %s from node %s", key, opts.OriginNode)
+	} else {
+		c.localPut(key, incoming.Value, incoming.VectorClock)
+	}
+
+	textLog(c.NodeID, "INTERNAL", "Internal PUT completed for key %s with vector clock %v", key, incoming.VectorClock.Clock)
+}
+
+func (c *Coordinator) applyRepair(key string, value storedValue) {
+	c.storeReplicaValue(key, value)
+	textLog(c.NodeID, "REPAIR", "Repaired key %s with value and %d conflicts", key, len(value.Conflicts))
 }
 
 func (c *Coordinator) performMerkleSyncWithNode(nodeID string) {
@@ -1097,56 +1104,7 @@ func (c *Coordinator) processHints() {
 
 // New function to directly deliver hints with retries
 func (c *Coordinator) deliverHintDirect(hint HintedWrite) bool {
-	url := fmt.Sprintf("http://%s:%d/internal/kv/%s",
-		getHost(hint.TargetNode), getPortForNode(hint.TargetNode), hint.Key)
-
-	// Safety check for nil vector clock
-	if hint.VectorClock == nil {
-		hint.VectorClock = NewVectorClock()
-	}
-
-	body := map[string]interface{}{
-		"value":        hint.Value,
-		"vector_clock": hint.VectorClock.Clock,
-		"timestamp":    hint.Timestamp.Format(time.RFC3339),
-		"is_hint":      true,
-		"origin_node":  c.NodeID,
-	}
-
-	bodyBytes, _ := json.Marshal(body)
-
-	// Try multiple times with backoff
-	for i := 0; i < 5; i++ {
-		req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
-		if err != nil {
-			textLog(c.NodeID, "HINT_DELIVERY", "Error creating request: %v", err)
-			time.Sleep(time.Duration(100*(1<<uint(i))) * time.Millisecond)
-			continue
-		}
-
-		req.Header.Set("Content-Type", "application/json")
-
-		client := &http.Client{Timeout: 5 * time.Second} // Longer timeout
-		resp, err := client.Do(req)
-
-		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
-				c.Stats.mu.Lock()
-				c.Stats.HintDeliverCount++
-				c.Stats.mu.Unlock()
-				return true
-			}
-			textLog(c.NodeID, "HINT_DELIVERY", "Delivery attempt returned status %d", resp.StatusCode)
-		} else {
-			textLog(c.NodeID, "HINT_DELIVERY", "Delivery attempt error: %v", err)
-		}
-
-		// Backoff before retry
-		time.Sleep(time.Duration(100*(1<<uint(i))) * time.Millisecond)
-	}
-
-	return false
+	return c.deliverHint(hint)
 }
 
 // Force reconnect any hints when a node comes back online
@@ -1226,41 +1184,35 @@ func (c *Coordinator) forceReplicateKeyToNode(key string, targetNodeID string) b
 		return false
 	}
 
-	// Force the key directly to the target node with special flags
-	url := fmt.Sprintf("http://%s:%d/internal/kv/%s",
-		getHost(targetNodeID), getPortForNode(targetNodeID), key)
-
-	// Create body with force flag
-	body := map[string]interface{}{
-		"value":        value.Value,
-		"vector_clock": value.VectorClock.Clock,
-		"timestamp":    time.Now().Format(time.RFC3339),
-		"force_key":    true,
-		"origin_node":  c.NodeID,
+	client, err := getInternalServiceClient(targetNodeID)
+	if err != nil {
+		textLog(c.NodeID, "TEST_FIX", "Error creating gRPC client: %v", err)
+		return false
 	}
 
-	bodyBytes, _ := json.Marshal(body)
+	protoValue, err := storedValueToProto(value)
+	if err != nil {
+		textLog(c.NodeID, "TEST_FIX", "Error encoding value: %v", err)
+		return false
+	}
 
 	// Try multiple times with short pauses between
 	for i := 0; i < 5; i++ {
-		req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
-		if err != nil {
-			textLog(c.NodeID, "TEST_FIX", "Error creating request: %v", err)
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-
-		req.Header.Set("Content-Type", "application/json")
-		client := &http.Client{Timeout: 2 * time.Second}
-		resp, err := client.Do(req)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		resp, err := client.PutLocal(ctx, &internalpb.PutLocalRequest{
+			Key:        key,
+			Value:      protoValue,
+			ForceKey:   true,
+			OriginNode: c.NodeID,
+		}, grpc.WaitForReady(true))
+		cancel()
 
 		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
+			if resp.Ok {
 				textLog(c.NodeID, "TEST_FIX", "Successfully forced key %s to node %s", key, targetNodeID)
 				return true
 			}
-			textLog(c.NodeID, "TEST_FIX", "Response status: %d", resp.StatusCode)
+			textLog(c.NodeID, "TEST_FIX", "Response message: %s", resp.Message)
 		} else {
 			textLog(c.NodeID, "TEST_FIX", "Error: %v", err)
 		}
@@ -1274,47 +1226,45 @@ func (c *Coordinator) forceReplicateKeyToNode(key string, targetNodeID string) b
 
 // Enhanced deliverHint function - much more aggressive retry logic
 func (c *Coordinator) deliverHint(hint HintedWrite) bool {
-	url := fmt.Sprintf("http://%s:%d/internal/kv/%s",
-		getHost(hint.TargetNode), getPortForNode(hint.TargetNode), hint.Key)
-
-	// Safety check for nil vector clock
 	if hint.VectorClock == nil {
 		hint.VectorClock = NewVectorClock()
 	}
 
-	body := map[string]interface{}{
-		"value":        hint.Value,
-		"vector_clock": hint.VectorClock.Clock,
-		"timestamp":    hint.Timestamp.Format(time.RFC3339),
-		"is_hint":      true,
-		"origin_node":  c.NodeID,
+	client, err := getInternalServiceClient(hint.TargetNode)
+	if err != nil {
+		textLog(c.NodeID, "HINT_DELIVERY", "Error creating gRPC client: %v", err)
+		return false
 	}
 
-	bodyBytes, _ := json.Marshal(body)
+	protoValue, err := storedValueToProto(storedValue{
+		Value:       hint.Value,
+		VectorClock: hint.VectorClock,
+		Timestamp:   hint.Timestamp,
+	})
+	if err != nil {
+		textLog(c.NodeID, "HINT_DELIVERY", "Error encoding hint: %v", err)
+		return false
+	}
 
 	// Try 5 times with backoff
 	for i := 0; i < 5; i++ {
-		req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
-		if err != nil {
-			textLog(c.NodeID, "HINT_DELIVERY", "Error creating request: %v", err)
-			time.Sleep(time.Duration(100*(1<<uint(i))) * time.Millisecond)
-			continue
-		}
-
-		req.Header.Set("Content-Type", "application/json")
-
-		client := &http.Client{Timeout: 5 * time.Second} // Longer timeout
-		resp, err := client.Do(req)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		resp, err := client.PutLocal(ctx, &internalpb.PutLocalRequest{
+			Key:        hint.Key,
+			Value:      protoValue,
+			IsHint:     true,
+			OriginNode: c.NodeID,
+		}, grpc.WaitForReady(true))
+		cancel()
 
 		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
+			if resp.Ok {
 				c.Stats.mu.Lock()
 				c.Stats.HintDeliverCount++
 				c.Stats.mu.Unlock()
 				return true
 			}
-			textLog(c.NodeID, "HINT_DELIVERY", "Delivery attempt returned status %d", resp.StatusCode)
+			textLog(c.NodeID, "HINT_DELIVERY", "Delivery attempt returned message %s", resp.Message)
 		} else {
 			textLog(c.NodeID, "HINT_DELIVERY", "Delivery attempt error: %v", err)
 		}
@@ -1377,7 +1327,6 @@ func (c *Coordinator) directSyncWithNode(nodeID string) {
 
 // Add a new method for more aggressive sync during anti-entropy
 func (c *Coordinator) forceSyncKey(nodeID, key string, value interface{}, vc *VectorClock) bool {
-	// Safety checks
 	if nodeID == "" || key == "" {
 		return false
 	}
@@ -1387,36 +1336,36 @@ func (c *Coordinator) forceSyncKey(nodeID, key string, value interface{}, vc *Ve
 		vc.Increment(c.NodeID)
 	}
 
-	url := fmt.Sprintf("http://%s:%d/internal/kv/%s",
-		getHost(nodeID), getPortForNode(nodeID), key)
-
-	body := map[string]interface{}{
-		"value":        value,
-		"vector_clock": vc.Clock,
-		"timestamp":    time.Now().Format(time.RFC3339),
-		"force_sync":   true,
-	}
-
-	bodyBytes, _ := json.Marshal(body)
-
-	// Better error handling for request creation
-	req, err := http.NewRequest("PUT", url, bytes.NewReader(bodyBytes))
+	client, err := getInternalServiceClient(nodeID)
 	if err != nil {
-		textLog(c.NodeID, "ANTI_ENTROPY", "Error creating request for %s: %v", url, err)
+		textLog(c.NodeID, "ANTI_ENTROPY", "Error creating gRPC client for %s: %v", nodeID, err)
 		return false
 	}
 
-	req.Header.Set("Content-Type", "application/json")
+	protoValue, err := storedValueToProto(storedValue{
+		Value:       value,
+		VectorClock: vc,
+		Timestamp:   time.Now(),
+	})
+	if err != nil {
+		textLog(c.NodeID, "ANTI_ENTROPY", "Error encoding key %s: %v", key, err)
+		return false
+	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	resp, err := client.PutLocal(ctx, &internalpb.PutLocalRequest{
+		Key:       key,
+		Value:     protoValue,
+		ForceSync: true,
+	}, grpc.WaitForReady(true))
 	if err != nil {
 		textLog(c.NodeID, "ANTI_ENTROPY", "Error syncing key %s to %s: %v", key, nodeID, err)
 		return false
 	}
-	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK
+	return resp.Ok
 }
 
 func (c *Coordinator) statsReporter() {

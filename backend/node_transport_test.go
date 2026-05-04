@@ -2,36 +2,72 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
-	"net/http"
 	"testing"
 	"time"
+
+	internalpb "dynamo-db/proto"
+	"google.golang.org/grpc"
 )
 
-func startMockNodeServer(t *testing.T, nodeID string, handler http.HandlerFunc) {
+type mockInternalServiceServer struct {
+	internalpb.UnimplementedInternalServiceServer
+	getLocal        func(context.Context, *internalpb.GetLocalRequest) (*internalpb.GetLocalResponse, error)
+	putLocal        func(context.Context, *internalpb.PutLocalRequest) (*internalpb.OperationStatus, error)
+	repairKey       func(context.Context, *internalpb.RepairKeyRequest) (*internalpb.OperationStatus, error)
+	getMerkleBucket func(context.Context, *internalpb.GetMerkleBucketRequest) (*internalpb.MerkleTreeResponse, error)
+}
+
+func (m *mockInternalServiceServer) GetLocal(ctx context.Context, req *internalpb.GetLocalRequest) (*internalpb.GetLocalResponse, error) {
+	if m.getLocal != nil {
+		return m.getLocal(ctx, req)
+	}
+	return &internalpb.GetLocalResponse{Found: false}, nil
+}
+
+func (m *mockInternalServiceServer) PutLocal(ctx context.Context, req *internalpb.PutLocalRequest) (*internalpb.OperationStatus, error) {
+	if m.putLocal != nil {
+		return m.putLocal(ctx, req)
+	}
+	return &internalpb.OperationStatus{Ok: true, Message: "OK"}, nil
+}
+
+func (m *mockInternalServiceServer) RepairKey(ctx context.Context, req *internalpb.RepairKeyRequest) (*internalpb.OperationStatus, error) {
+	if m.repairKey != nil {
+		return m.repairKey(ctx, req)
+	}
+	return &internalpb.OperationStatus{Ok: true, Message: "OK"}, nil
+}
+
+func (m *mockInternalServiceServer) GetMerkleBucket(ctx context.Context, req *internalpb.GetMerkleBucketRequest) (*internalpb.MerkleTreeResponse, error) {
+	if m.getMerkleBucket != nil {
+		return m.getMerkleBucket(ctx, req)
+	}
+	return merkleTreeToProto(NewMerkleTree(map[string]interface{}{})), nil
+}
+
+func startMockNodeServer(t *testing.T, nodeID string, serverImpl *mockInternalServiceServer) {
 	t.Helper()
 
-	addr := fmt.Sprintf("127.0.0.1:%d", getPortForNode(nodeID))
+	addr := fmt.Sprintf("127.0.0.1:%d", getGRPCPortForNode(nodeID))
 	listener, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Fatalf("failed to listen on %s for %s: %v", addr, nodeID, err)
 	}
 
-	server := &http.Server{Handler: handler}
+	server := grpc.NewServer()
+	internalpb.RegisterInternalServiceServer(server, serverImpl)
 	serveDone := make(chan error, 1)
 	go func() {
 		serveDone <- server.Serve(listener)
 	}()
 
 	t.Cleanup(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-		defer cancel()
-		_ = server.Shutdown(ctx)
+		server.GracefulStop()
 		err := <-serveDone
-		if err != nil && err != http.ErrServerClosed {
-			t.Fatalf("mock server for %s returned error: %v", nodeID, err)
+		if err != nil {
+			t.Fatalf("mock gRPC server for %s returned error: %v", nodeID, err)
 		}
 	})
 }
@@ -41,22 +77,15 @@ func TestRepairNodeSendsPayloadAndUpdatesStats(t *testing.T) {
 	targetNodeID := "node11000"
 	fixedTime := time.Now().UTC().Truncate(time.Second)
 
-	received := make(chan map[string]interface{}, 1)
-	startMockNodeServer(t, targetNodeID, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
-			t.Errorf("expected PUT method, got %s", r.Method)
-		}
-		if want := "/internal/repair/repair-key"; r.URL.Path != want {
-			t.Errorf("expected request path %s, got %s", want, r.URL.Path)
-		}
-
-		defer r.Body.Close()
-		var body map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("failed to decode request body: %v", err)
-		}
-		received <- body
-		w.WriteHeader(http.StatusOK)
+	received := make(chan storedValue, 1)
+	startMockNodeServer(t, targetNodeID, &mockInternalServiceServer{
+		repairKey: func(ctx context.Context, req *internalpb.RepairKeyRequest) (*internalpb.OperationStatus, error) {
+			if req.Key != "repair-key" {
+				t.Errorf("expected repair key, got %s", req.Key)
+			}
+			received <- protoToStoredValue(req.Value)
+			return &internalpb.OperationStatus{Ok: true, Message: "OK"}, nil
+		},
 	})
 
 	value := storedValue{
@@ -71,26 +100,20 @@ func TestRepairNodeSendsPayloadAndUpdatesStats(t *testing.T) {
 	c.repairNode(targetNodeID, "repair-key", value)
 
 	body := <-received
-	if body["value"] != "latest" {
-		t.Fatalf("expected value latest, got %v", body["value"])
+	if body.Value != "latest" {
+		t.Fatalf("expected value latest, got %v", body.Value)
 	}
-	if body["timestamp"] != fixedTime.Format(time.RFC3339) {
-		t.Fatalf("expected timestamp %s, got %v", fixedTime.Format(time.RFC3339), body["timestamp"])
+	if !body.Timestamp.Equal(fixedTime) {
+		t.Fatalf("expected timestamp %s, got %v", fixedTime.Format(time.RFC3339), body.Timestamp)
 	}
-
-	vc := body["vector_clock"].(map[string]interface{})
-	if got := int(vc["nodeA"].(float64)); got != 3 {
+	if got := body.VectorClock.Clock["nodeA"]; got != 3 {
 		t.Fatalf("expected vector clock nodeA=3, got %d", got)
 	}
-
-	conflicts := body["conflicts"].([]interface{})
-	if len(conflicts) != 1 {
-		t.Fatalf("expected 1 conflict payload, got %d", len(conflicts))
+	if len(body.Conflicts) != 1 {
+		t.Fatalf("expected 1 conflict payload, got %d", len(body.Conflicts))
 	}
-
-	conflict := conflicts[0].(map[string]interface{})
-	if conflict["value"] != "older" {
-		t.Fatalf("expected conflict value older, got %v", conflict["value"])
+	if body.Conflicts[0].Value != "older" {
+		t.Fatalf("expected conflict value older, got %v", body.Conflicts[0].Value)
 	}
 
 	if c.Stats.ReadRepairCount != 1 {
@@ -105,8 +128,10 @@ func TestRepairNodeDoesNotUpdateStatsOnFailure(t *testing.T) {
 	c := newTestCoordinator(t, "testRepairNodeFail", 1)
 	targetNodeID := "node11001"
 
-	startMockNodeServer(t, targetNodeID, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
+	startMockNodeServer(t, targetNodeID, &mockInternalServiceServer{
+		repairKey: func(ctx context.Context, req *internalpb.RepairKeyRequest) (*internalpb.OperationStatus, error) {
+			return &internalpb.OperationStatus{Ok: false, Message: "fail"}, nil
+		},
 	})
 
 	c.repairNode(targetNodeID, "repair-key", storedValue{
@@ -128,22 +153,12 @@ func TestDeliverHintSendsHintPayloadAndUpdatesStats(t *testing.T) {
 	targetNodeID := "node11002"
 	fixedTime := time.Now().UTC().Truncate(time.Second)
 
-	received := make(chan map[string]interface{}, 1)
-	startMockNodeServer(t, targetNodeID, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPut {
-			t.Errorf("expected PUT method, got %s", r.Method)
-		}
-		if want := "/internal/kv/hint-key"; r.URL.Path != want {
-			t.Errorf("expected request path %s, got %s", want, r.URL.Path)
-		}
-
-		defer r.Body.Close()
-		var body map[string]interface{}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("failed to decode request body: %v", err)
-		}
-		received <- body
-		w.WriteHeader(http.StatusOK)
+	received := make(chan *internalpb.PutLocalRequest, 1)
+	startMockNodeServer(t, targetNodeID, &mockInternalServiceServer{
+		putLocal: func(ctx context.Context, req *internalpb.PutLocalRequest) (*internalpb.OperationStatus, error) {
+			received <- req
+			return &internalpb.OperationStatus{Ok: true, Message: "OK"}, nil
+		},
 	})
 
 	hint := HintedWrite{
@@ -158,22 +173,21 @@ func TestDeliverHintSendsHintPayloadAndUpdatesStats(t *testing.T) {
 		t.Fatal("expected deliverHint to succeed")
 	}
 
-	body := <-received
-	if body["value"] != "hint-value" {
-		t.Fatalf("expected hint value, got %v", body["value"])
+	req := <-received
+	body := protoToStoredValue(req.Value)
+	if body.Value != "hint-value" {
+		t.Fatalf("expected hint value, got %v", body.Value)
 	}
-	if body["origin_node"] != c.NodeID {
-		t.Fatalf("expected origin node %s, got %v", c.NodeID, body["origin_node"])
+	if req.OriginNode != c.NodeID {
+		t.Fatalf("expected origin node %s, got %v", c.NodeID, req.OriginNode)
 	}
-	if body["is_hint"] != true {
-		t.Fatalf("expected is_hint=true, got %v", body["is_hint"])
+	if !req.IsHint {
+		t.Fatalf("expected is_hint=true, got %v", req.IsHint)
 	}
-	if body["timestamp"] != fixedTime.Format(time.RFC3339) {
-		t.Fatalf("expected timestamp %s, got %v", fixedTime.Format(time.RFC3339), body["timestamp"])
+	if !body.Timestamp.Equal(fixedTime) {
+		t.Fatalf("expected timestamp %s, got %v", fixedTime.Format(time.RFC3339), body.Timestamp)
 	}
-
-	vc := body["vector_clock"].(map[string]interface{})
-	if got := int(vc["nodeA"].(float64)); got != 2 {
+	if got := body.VectorClock.Clock["nodeA"]; got != 2 {
 		t.Fatalf("expected vector clock nodeA=2, got %d", got)
 	}
 
@@ -186,8 +200,10 @@ func TestProcessHintsRemovesDeliveredHints(t *testing.T) {
 	c := newTestCoordinator(t, "originNodeProcessHints", 1)
 	targetNodeID := "node11003"
 
-	startMockNodeServer(t, targetNodeID, func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
+	startMockNodeServer(t, targetNodeID, &mockInternalServiceServer{
+		putLocal: func(ctx context.Context, req *internalpb.PutLocalRequest) (*internalpb.OperationStatus, error) {
+			return &internalpb.OperationStatus{Ok: true, Message: "OK"}, nil
+		},
 	})
 
 	c.Hints[targetNodeID] = []HintedWrite{{

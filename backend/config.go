@@ -8,15 +8,17 @@ import (
 )
 
 type PeerConfig struct {
-	NodeID string `json:"node_id"`
-	Host   string `json:"host"`
-	Port   int    `json:"port"`
+	NodeID   string `json:"node_id"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	GRPCPort int    `json:"grpc_port"`
 }
 
 type Config struct {
 	NodeID               string       `json:"node_id"`
 	Host                 string       `json:"host"`
 	Port                 int          `json:"port"`
+	GRPCPort             int          `json:"grpc_port"`
 	Peers                []PeerConfig `json:"peers"`
 	ReplicationFactor    int          `json:"replication_factor"`
 	ReadQuorum           int          `json:"read_quorum"`

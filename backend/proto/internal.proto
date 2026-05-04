@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package internal;
+
+option go_package = "dynamo-db/proto;internalpb";
+
+import "google/protobuf/struct.proto";
+
+service InternalService {
+  rpc GetLocal(GetLocalRequest) returns (GetLocalResponse);
+  rpc PutLocal(PutLocalRequest) returns (OperationStatus);
+  rpc GetMerkleBucket(GetMerkleBucketRequest) returns (MerkleTreeResponse);
+  rpc RepairKey(RepairKeyRequest) returns (OperationStatus);
+  rpc StoreHint(StoreHintRequest) returns (OperationStatus);
+  rpc ExchangeGossip(GossipRequest) returns (OperationStatus);
+}
+
+message VectorClock {
+  map<string, int32> clock = 1;
+}
+
+message StoredValue {
+  google.protobuf.Value value = 1;
+  VectorClock vector_clock = 2;
+  repeated StoredValue conflicts = 3;
+  int64 timestamp_unix_nano = 4;
+}
+
+message GetLocalRequest {
+  string key = 1;
+}
+
+message GetLocalResponse {
+  bool found = 1;
+  StoredValue value = 2;
+}
+
+message PutLocalRequest {
+  string key = 1;
+  StoredValue value = 2;
+  bool force_sync = 3;
+  bool force_key = 4;
+  bool is_hint = 5;
+  string origin_node = 6;
+}
+
+message RepairKeyRequest {
+  string key = 1;
+  StoredValue value = 2;
+}
+
+message HintedWrite {
+  string key = 1;
+  StoredValue value = 2;
+  string target_node = 3;
+  int32 attempts = 4;
+}
+
+message StoreHintRequest {
+  HintedWrite hint = 1;
+}
+
+message GetMerkleBucketRequest {
+  int32 bucket = 1;
+}
+
+message MerkleLevel {
+  repeated string hashes = 1;
+}
+
+message MerkleTreeResponse {
+  repeated string leaves = 1;
+  repeated MerkleLevel levels = 2;
+  map<string, string> key_map = 3;
+  int32 version = 4;
+  string root = 5;
+}
+
+message MemberState {
+  string node_id = 1;
+  string host = 2;
+  int32 port = 3;
+  int32 grpc_port = 4;
+  int64 heartbeat = 5;
+  string status = 6;
+  int64 last_seen_unix_nano = 7;
+}
+
+message GossipRequest {
+  string node_id = 1;
+  string host = 2;
+  int32 port = 3;
+  int32 grpc_port = 4;
+  int64 heartbeat = 5;
+  map<string, MemberState> members = 6;
+}
+
+message OperationStatus {
+  bool ok = 1;
+  string message = 2;
+}

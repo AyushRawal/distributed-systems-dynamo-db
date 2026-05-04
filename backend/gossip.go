@@ -1,13 +1,15 @@
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
-	"fmt"
 	"math/rand"
 	"net/http"
 	"sync"
 	"time"
+
+	internalpb "dynamo-db/proto"
+	"google.golang.org/grpc"
 )
 
 type NodeStatus string
@@ -22,10 +24,20 @@ type Member struct {
 	NodeID    string
 	Host      string
 	Port      int
+	GRPCPort  int
 	Heartbeat int64
 	Status    NodeStatus
 	LastSeen  time.Time
 	Metadata  map[string]string // For future extensions
+}
+
+type gossipPayload struct {
+	NodeID    string
+	Host      string
+	Port      int
+	GRPCPort  int
+	Heartbeat int64
+	Members   map[string]*Member
 }
 
 type GossipService struct {
@@ -40,6 +52,7 @@ func NewGossipService(nodeID string, allNodes []string) *GossipService {
 		NodeID:    nodeID,
 		Host:      "localhost", // Default to localhost
 		Port:      getPortForNode(nodeID),
+		GRPCPort:  getGRPCPortForNode(nodeID),
 		Heartbeat: 0,
 		Status:    StatusAlive,
 		LastSeen:  time.Now(),
@@ -58,6 +71,7 @@ func NewGossipService(nodeID string, allNodes []string) *GossipService {
 				NodeID:    nid,
 				Host:      "localhost", // Default to localhost
 				Port:      getPortForNode(nid),
+				GRPCPort:  getGRPCPortForNode(nid),
 				Heartbeat: 0,
 				Status:    StatusAlive,
 				LastSeen:  time.Now(),
@@ -159,25 +173,28 @@ func (gs *GossipService) sendGossipToNode(target *Member) {
 		return
 	}
 
-	client := &http.Client{
-		Timeout: 1 * time.Second, // Reduced timeout for faster tests
+	client, err := getInternalServiceClient(target.NodeID)
+	if err != nil {
+		textLog(gs.Self.NodeID, "GOSSIP", "Failed to create gRPC client for %s: %v", target.NodeID, err)
+		return
 	}
 
-	url := fmt.Sprintf("http://%s:%d/internal/gossip", target.Host, target.Port)
-	payload := gs.createGossipPayload()
+	payload := gs.createGossipRequest()
 
 	// Make 5 attempts with backoff (up from 3)
 	for retries := 0; retries < 5; retries++ {
-		resp, err := client.Post(url, "application/json", bytes.NewReader(payload))
+		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+		resp, err := client.ExchangeGossip(ctx, payload, grpc.WaitForReady(true))
+		cancel()
 		if err == nil {
-			defer resp.Body.Close()
-			if resp.StatusCode == http.StatusOK {
+			if resp.Ok {
 				if target.Status != StatusAlive {
 					textLog(gs.Self.NodeID, "GOSSIP", "Successfully contacted %s, marking as ALIVE", target.NodeID)
 					gs.Members.Store(target.NodeID, &Member{
 						NodeID:    target.NodeID,
 						Host:      target.Host,
 						Port:      target.Port,
+						GRPCPort:  target.GRPCPort,
 						Status:    StatusAlive,
 						LastSeen:  time.Now(),
 						Heartbeat: target.Heartbeat,
@@ -187,7 +204,6 @@ func (gs *GossipService) sendGossipToNode(target *Member) {
 			}
 		}
 
-		// Exponential backoff - but shorter for tests
 		time.Sleep(time.Duration(100*(1<<uint(retries))) * time.Millisecond)
 	}
 
@@ -197,36 +213,29 @@ func (gs *GossipService) sendGossipToNode(target *Member) {
 		NodeID:    target.NodeID,
 		Host:      target.Host,
 		Port:      target.Port,
+		GRPCPort:  target.GRPCPort,
 		Status:    StatusSuspected,
 		LastSeen:  target.LastSeen,
 		Heartbeat: target.Heartbeat,
 	})
 }
 
-func (gs *GossipService) createGossipPayload() []byte {
-	state := map[string]interface{}{
-		"node_id":   gs.Self.NodeID,
-		"host":      gs.Self.Host,
-		"port":      gs.Self.Port,
-		"heartbeat": gs.Self.Heartbeat,
-		"members":   gs.collectMemberStates(),
+func (gs *GossipService) createGossipRequest() *internalpb.GossipRequest {
+	return &internalpb.GossipRequest{
+		NodeId:    gs.Self.NodeID,
+		Host:      gs.Self.Host,
+		Port:      int32(gs.Self.Port),
+		GrpcPort:  int32(gs.Self.GRPCPort),
+		Heartbeat: gs.Self.Heartbeat,
+		Members:   gs.collectMemberStates(),
 	}
-
-	payload, _ := json.Marshal(state)
-	return payload
 }
 
-func (gs *GossipService) collectMemberStates() map[string]interface{} {
-	members := make(map[string]interface{})
+func (gs *GossipService) collectMemberStates() map[string]*internalpb.MemberState {
+	members := make(map[string]*internalpb.MemberState)
 	gs.Members.Range(func(key, value interface{}) bool {
 		member := value.(*Member)
-		members[member.NodeID] = map[string]interface{}{
-			"host":      member.Host,
-			"port":      member.Port,
-			"heartbeat": member.Heartbeat,
-			"status":    member.Status,
-			"last_seen": member.LastSeen.UnixNano(),
-		}
+		members[member.NodeID] = memberToProto(member)
 		return true
 	})
 	return members
@@ -234,20 +243,62 @@ func (gs *GossipService) collectMemberStates() map[string]interface{} {
 
 // Fix for HandleGossip to better handle failing nodes
 func (gs *GossipService) HandleGossip(w http.ResponseWriter, r *http.Request) {
-	var payload struct {
+	var raw struct {
 		NodeID    string                 `json:"node_id"`
 		Host      string                 `json:"host"`
 		Port      int                    `json:"port"`
+		GRPCPort  int                    `json:"grpc_port"`
 		Heartbeat int64                  `json:"heartbeat"`
 		Members   map[string]interface{} `json:"members"`
 	}
 
 	defer r.Body.Close()
 
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
 		textLog(gs.Self.NodeID, "GOSSIP", "Received invalid gossip payload: %v", err)
 		http.Error(w, "Invalid gossip payload", http.StatusBadRequest)
 		return
+	}
+
+	payload := gossipPayload{
+		NodeID:    raw.NodeID,
+		Host:      raw.Host,
+		Port:      raw.Port,
+		GRPCPort:  raw.GRPCPort,
+		Heartbeat: raw.Heartbeat,
+		Members:   make(map[string]*Member, len(raw.Members)),
+	}
+	for nodeID, data := range raw.Members {
+		memberData, ok := data.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		host, _ := memberData["host"].(string)
+		portFloat, _ := memberData["port"].(float64)
+		grpcPortFloat, _ := memberData["grpc_port"].(float64)
+		heartbeatFloat, _ := memberData["heartbeat"].(float64)
+		statusStr, _ := memberData["status"].(string)
+		lastSeenFloat, _ := memberData["last_seen"].(float64)
+		payload.Members[nodeID] = &Member{
+			NodeID:    nodeID,
+			Host:      host,
+			Port:      int(portFloat),
+			GRPCPort:  int(grpcPortFloat),
+			Heartbeat: int64(heartbeatFloat),
+			Status:    NodeStatus(statusStr),
+			LastSeen:  time.Unix(0, int64(lastSeenFloat)),
+		}
+	}
+
+	gs.processGossipPayload(payload)
+
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("OK"))
+}
+
+func (gs *GossipService) processGossipPayload(payload gossipPayload) {
+	if payload.GRPCPort == 0 {
+		payload.GRPCPort = getGRPCPortForNode(payload.NodeID)
 	}
 
 	// Always mark the sender as alive since we just heard from them
@@ -255,41 +306,23 @@ func (gs *GossipService) HandleGossip(w http.ResponseWriter, r *http.Request) {
 		NodeID:    payload.NodeID,
 		Host:      payload.Host,
 		Port:      payload.Port,
+		GRPCPort:  payload.GRPCPort,
 		Heartbeat: payload.Heartbeat,
 		LastSeen:  time.Now(),
 		Status:    StatusAlive,
 	})
 
 	// Process remote member states
-	for nodeID, data := range payload.Members {
-		memberData, ok := data.(map[string]interface{})
-		if !ok {
+	for nodeID, member := range payload.Members {
+		if member == nil {
 			textLog(gs.Self.NodeID, "GOSSIP", "Invalid member data format for %s", nodeID)
 			continue
 		}
-
-		// Extract required fields with safety checks
-		host, _ := memberData["host"].(string)
-		portFloat, _ := memberData["port"].(float64)
-		port := int(portFloat)
-		heartbeatFloat, _ := memberData["heartbeat"].(float64)
-		heartbeat := int64(heartbeatFloat)
-		statusStr, _ := memberData["status"].(string)
-		lastSeenFloat, _ := memberData["last_seen"].(float64)
-
-		// Create and update member
-		gs.updateMember(&Member{
-			NodeID:    nodeID,
-			Host:      host,
-			Port:      port,
-			Heartbeat: heartbeat,
-			Status:    NodeStatus(statusStr),
-			LastSeen:  time.Unix(0, int64(lastSeenFloat)),
-		})
+		if member.GRPCPort == 0 {
+			member.GRPCPort = getGRPCPortForNode(nodeID)
+		}
+		gs.updateMember(member)
 	}
-
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
 }
 
 // Fix updateMember function to be more reliable
@@ -327,8 +360,11 @@ func (gs *GossipService) updateMember(newMember *Member) {
 		}
 	}
 
-	// Always update last seen time if we're hearing about this node
-	current.LastSeen = time.Now()
+	// Only advance liveness from newer observations. This prevents third-party
+	// gossip from continuously refreshing a failed node's LastSeen timestamp.
+	if newMember.LastSeen.After(current.LastSeen) {
+		current.LastSeen = newMember.LastSeen
+	}
 
 	// Update status based on heartbeat and status information
 	if newMember.Heartbeat > current.Heartbeat {
@@ -349,6 +385,7 @@ func (gs *GossipService) updateMember(newMember *Member) {
 		// Always update host/port when heartbeat increases
 		current.Host = newMember.Host
 		current.Port = newMember.Port
+		current.GRPCPort = newMember.GRPCPort
 	}
 
 	// Remember that someone else thinks this node is down
@@ -487,6 +524,7 @@ func (gs *GossipService) getNodeStatus(nodeID string) NodeStatus {
 		NodeID:    nodeID,
 		Host:      "localhost",
 		Port:      getPortForNode(nodeID),
+		GRPCPort:  getGRPCPortForNode(nodeID),
 		Heartbeat: 0,
 		Status:    StatusSuspected,
 		LastSeen:  time.Now().Add(-4 * time.Second), // Make it appear as suspected
@@ -577,6 +615,7 @@ func (gs *GossipService) ForceNodeDown(nodeID string) {
 			NodeID:    nodeID,
 			Host:      "localhost",
 			Port:      getPortForNode(nodeID),
+			GRPCPort:  getGRPCPortForNode(nodeID),
 			Heartbeat: 0,
 			Status:    StatusDown,
 			LastSeen:  time.Now().Add(-15 * time.Second),
