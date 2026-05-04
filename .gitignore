@@ -1,0 +1,7 @@
+backend/dynamo-db
+admin-dashboard/control-tower
+
+backend/logs/*.log
+backend/logs/*.pid
+backend/logs/*.txt
+backend/data/*.json
