@@ -102,7 +102,14 @@ start_cluster() {
     cfg="$CFG_DIR/$node.json"
 
     info "Launching $node on :$port"
-    go run *.go -config="$cfg" >"$LOG_DIR/$node.log" 2>&1 &
+    # Build a dedicated binary to avoid 'go run' including *_test.go files.
+    mkdir -p bin
+    go build -o bin/node ./... > /dev/null 2>&1 || {
+      error "go build failed; see build output"
+      # capture build output to the node log for easier debugging
+      go build -o bin/node ./... >"$LOG_DIR/${node}.log" 2>&1 || true
+    }
+    ./bin/node -config="$cfg" >"$LOG_DIR/$node.log" 2>&1 &
     pid=$!
     echo "$pid" >"$LOG_DIR/$node.pid"
     sleep 2
