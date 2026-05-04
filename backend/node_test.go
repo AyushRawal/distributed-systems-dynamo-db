@@ -222,6 +222,25 @@ func TestParseStoredValue(t *testing.T) {
 		t.Fatalf("expected parsed timestamp %v, got %v", timestamp, parsed.Timestamp)
 	}
 
+	withConflicts := parseStoredValue(map[string]interface{}{
+		"value":        "latest",
+		"vector_clock": map[string]interface{}{"nodeA": float64(3)},
+		"timestamp":    timestamp.Format(time.RFC3339),
+		"conflicts": []interface{}{
+			map[string]interface{}{
+				"value":        "older",
+				"vector_clock": map[string]interface{}{"nodeB": float64(1)},
+			},
+		},
+	})
+
+	if len(withConflicts.Conflicts) != 1 {
+		t.Fatalf("expected 1 parsed conflict, got %d", len(withConflicts.Conflicts))
+	}
+	if withConflicts.Conflicts[0].Value != "older" {
+		t.Fatalf("expected parsed conflict value older, got %v", withConflicts.Conflicts[0].Value)
+	}
+
 	empty := parseStoredValue(map[string]interface{}{})
 	if empty.Value != nil {
 		t.Fatalf("expected empty parsed value for missing payload, got %v", empty.Value)

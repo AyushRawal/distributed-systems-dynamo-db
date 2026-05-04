@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +21,7 @@ const (
 	requestTimeout     = 2 * time.Second
 	hintStorageLimit   = 1000
 	defaultReplication = 3
+	merkleBucketCount  = 100
 )
 
 type storedValue struct {
@@ -476,14 +478,124 @@ func (c *Coordinator) localGet(key string) storedValue {
 	return c.DataStore[key]
 }
 
+func bucketForKey(key string) int {
+	return int(hashKey(key) % merkleBucketCount)
+}
+
+func cloneStoredValue(value storedValue) storedValue {
+	cloned := storedValue{
+		Value:     value.Value,
+		Timestamp: value.Timestamp,
+	}
+
+	if value.VectorClock != nil {
+		cloned.VectorClock = value.VectorClock.Clone()
+	}
+
+	if len(value.Conflicts) > 0 {
+		cloned.Conflicts = make([]storedValue, 0, len(value.Conflicts))
+		for _, conflict := range value.Conflicts {
+			cloned.Conflicts = append(cloned.Conflicts, cloneStoredValue(conflict))
+		}
+	}
+
+	return cloned
+}
+
+func canonicalJSON(value interface{}) string {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%v", value)
+	}
+	return string(payload)
+}
+
+func merklePayloadForStoredValue(value storedValue) map[string]interface{} {
+	payload := map[string]interface{}{
+		"value": value.Value,
+	}
+
+	if value.VectorClock != nil {
+		payload["vector_clock"] = value.VectorClock.Clock
+	} else {
+		payload["vector_clock"] = map[string]int{}
+	}
+
+	if len(value.Conflicts) > 0 {
+		conflicts := make([]map[string]interface{}, 0, len(value.Conflicts))
+		for _, conflict := range value.Conflicts {
+			conflicts = append(conflicts, merklePayloadForStoredValue(conflict))
+		}
+		sort.Slice(conflicts, func(i, j int) bool {
+			return canonicalJSON(conflicts[i]) < canonicalJSON(conflicts[j])
+		})
+		payload["conflicts"] = conflicts
+	}
+
+	return payload
+}
+
+func (c *Coordinator) buildMerkleTreeForBucket(bucket int) *MerkleTree {
+	treeData := make(map[string]interface{})
+
+	c.mu.RLock()
+	for key, value := range c.DataStore {
+		if bucketForKey(key) == bucket {
+			treeData[key] = merklePayloadForStoredValue(value)
+		}
+	}
+	c.mu.RUnlock()
+
+	return NewMerkleTree(treeData)
+}
+
+func (c *Coordinator) fetchMerkleTree(nodeID string, bucket int) (*MerkleTree, error) {
+	if nodeID == c.NodeID {
+		return c.buildMerkleTreeForBucket(bucket), nil
+	}
+
+	url := fmt.Sprintf("http://%s:%d/internal/merkle/%d",
+		getHost(nodeID), getPortForNode(nodeID), bucket)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := &http.Client{Timeout: requestTimeout}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	var payload map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, err
+	}
+
+	return DeserializeFromMap(payload)
+}
+
+func parseVectorClockFromPayload(data interface{}) *VectorClock {
+	vcMap := make(map[string]int)
+	if data == nil {
+		return &VectorClock{Clock: vcMap}
+	}
+
+	vcBytes, _ := json.Marshal(data)
+	_ = json.Unmarshal(vcBytes, &vcMap)
+	return &VectorClock{Clock: vcMap}
+}
+
 func parseStoredValue(data map[string]interface{}) storedValue {
 	if data["value"] == nil {
 		return storedValue{}
 	}
-
-	vcData, _ := json.Marshal(data["vector_clock"])
-	vcMap := make(map[string]int)
-	json.Unmarshal(vcData, &vcMap)
 
 	timestamp := time.Now()
 	if ts, ok := data["timestamp"].(string); ok {
@@ -492,11 +604,50 @@ func parseStoredValue(data map[string]interface{}) storedValue {
 		}
 	}
 
+	conflicts := make([]storedValue, 0)
+	if conflictData, ok := data["conflicts"].([]interface{}); ok {
+		for _, rawConflict := range conflictData {
+			conflictMap, ok := rawConflict.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			conflicts = append(conflicts, parseStoredValue(conflictMap))
+		}
+	}
+
 	return storedValue{
 		Value:       data["value"],
-		VectorClock: &VectorClock{Clock: vcMap},
+		VectorClock: parseVectorClockFromPayload(data["vector_clock"]),
+		Conflicts:   conflicts,
 		Timestamp:   timestamp,
 	}
+}
+
+func conflictEntriesForMerge(value storedValue) []storedValue {
+	entries := make([]storedValue, 0, len(value.Conflicts)+1)
+	for _, conflict := range value.Conflicts {
+		entries = append(entries, cloneStoredValue(conflict))
+	}
+
+	base := cloneStoredValue(value)
+	base.Conflicts = nil
+	entries = append(entries, base)
+	return entries
+}
+
+func choosePrimaryStoredValue(a, b storedValue) (storedValue, storedValue) {
+	if b.Timestamp.After(a.Timestamp) {
+		return b, a
+	}
+	if a.Timestamp.After(b.Timestamp) {
+		return a, b
+	}
+
+	if canonicalJSON(merklePayloadForStoredValue(b)) < canonicalJSON(merklePayloadForStoredValue(a)) {
+		return b, a
+	}
+
+	return a, b
 }
 
 func (c *Coordinator) resolveConflicts(responses map[string]storedValue) (storedValue, int) {
@@ -523,11 +674,18 @@ func (c *Coordinator) resolveConflicts(responses map[string]storedValue) (stored
 }
 
 func (c *Coordinator) mergeConflicts(a, b storedValue) storedValue {
-	merged := a
-	merged.VectorClock = a.VectorClock.Clone()
-	merged.VectorClock.Merge(b.VectorClock)
-	merged.Conflicts = append(a.Conflicts, b)
-	merged.Timestamp = time.Now()
+	primary, secondary := choosePrimaryStoredValue(a, b)
+	merged := cloneStoredValue(primary)
+	if merged.VectorClock == nil {
+		merged.VectorClock = NewVectorClock()
+	}
+	if secondary.VectorClock != nil {
+		merged.VectorClock.Merge(secondary.VectorClock)
+	}
+	merged.Conflicts = append(merged.Conflicts, conflictEntriesForMerge(secondary)...)
+	if secondary.Timestamp.After(merged.Timestamp) {
+		merged.Timestamp = secondary.Timestamp
+	}
 	return merged
 }
 
@@ -594,6 +752,76 @@ func (c *Coordinator) formatResult(value storedValue, conflicts int) map[string]
 	}
 
 	return result
+}
+
+func (c *Coordinator) storeReplicaValue(key string, value storedValue) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.DataStore[key] = cloneStoredValue(value)
+	c.saveData()
+}
+
+func (c *Coordinator) performMerkleSyncWithNode(nodeID string) {
+	if nodeID == c.NodeID || !c.isNodeAvailable(nodeID) {
+		textLog(c.NodeID, "ANTI_ENTROPY", "Skipping anti-entropy with %s (self or unavailable)", nodeID)
+		return
+	}
+
+	textLog(c.NodeID, "ANTI_ENTROPY", "Starting Merkle anti-entropy with node %s", nodeID)
+	for bucket := 0; bucket < merkleBucketCount; bucket++ {
+		localTree := c.buildMerkleTreeForBucket(bucket)
+		remoteTree, err := c.fetchMerkleTree(nodeID, bucket)
+		if err != nil {
+			textLog(c.NodeID, "ANTI_ENTROPY", "Failed to fetch Merkle tree for bucket %d from %s: %v", bucket, nodeID, err)
+			continue
+		}
+
+		diffKeys := localTree.CompareTrees(remoteTree)
+		if len(diffKeys) == 0 {
+			continue
+		}
+
+		textLog(c.NodeID, "ANTI_ENTROPY", "Bucket %d differs with %s for keys %v", bucket, nodeID, diffKeys)
+		for _, key := range diffKeys {
+			c.reconcileKeyWithNode(nodeID, key)
+		}
+	}
+
+	textLog(c.NodeID, "ANTI_ENTROPY", "Completed Merkle anti-entropy with node %s", nodeID)
+}
+
+func (c *Coordinator) reconcileKeyWithNode(nodeID, key string) {
+	localValue := c.localGet(key)
+	remoteValue := c.remoteGetWithRetry(nodeID, key)
+
+	switch {
+	case localValue.Value == nil && remoteValue.Value == nil:
+		return
+	case localValue.Value == nil:
+		textLog(c.NodeID, "ANTI_ENTROPY", "Repairing local key %s from %s", key, nodeID)
+		c.storeReplicaValue(key, remoteValue)
+		return
+	case remoteValue.Value == nil:
+		textLog(c.NodeID, "ANTI_ENTROPY", "Repairing remote key %s on %s", key, nodeID)
+		c.repairNode(nodeID, key, localValue)
+		return
+	}
+
+	comparison := compareVectorClocks(localValue.VectorClock, remoteValue.VectorClock)
+	switch comparison {
+	case "newer":
+		textLog(c.NodeID, "ANTI_ENTROPY", "Updating local stale key %s from %s", key, nodeID)
+		c.storeReplicaValue(key, remoteValue)
+	case "older":
+		textLog(c.NodeID, "ANTI_ENTROPY", "Repairing stale remote key %s on %s", key, nodeID)
+		c.repairNode(nodeID, key, localValue)
+	case "concurrent":
+		merged := c.mergeConflicts(localValue, remoteValue)
+		textLog(c.NodeID, "ANTI_ENTROPY", "Reconciling concurrent key %s with %s", key, nodeID)
+		c.storeReplicaValue(key, merged)
+		c.repairNode(nodeID, key, merged)
+	}
 }
 
 func (c *Coordinator) updateLocalVectorClock(key string) *VectorClock {

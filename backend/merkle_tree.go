@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -38,7 +39,14 @@ func NewMerkleTree(data map[string]interface{}) *MerkleTree {
 }
 
 func hashLeaf(key string, value interface{}) string {
-	data := fmt.Sprintf("%s:%v", key, value)
+	payload, err := json.Marshal(value)
+	if err != nil {
+		data := fmt.Sprintf("%s:%v", key, value)
+		hash := sha256.Sum256([]byte(data))
+		return hex.EncodeToString(hash[:])
+	}
+
+	data := fmt.Sprintf("%s:%s", key, payload)
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
 }

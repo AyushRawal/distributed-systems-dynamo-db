@@ -198,9 +198,8 @@ func (c *Coordinator) performAntiEntropy() {
 		if peer == c.NodeID {
 			continue
 		}
-		// Directly sync with each peer - more reliable than Merkle trees for test cases
-		textLog(c.NodeID, "ANTI_ENTROPY", "Direct syncing with peer %s", peer)
-		c.directSyncWithNode(peer)
+		textLog(c.NodeID, "ANTI_ENTROPY", "Merkle syncing with peer %s", peer)
+		c.performMerkleSyncWithNode(peer)
 	}
 
 	textLog(c.NodeID, "ANTI_ENTROPY", "Completed anti-entropy cycle")
@@ -344,23 +343,10 @@ func InternalPutHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle vector clock with better error handling
-	var vc *VectorClock
-	if vcInterface, ok := body["vector_clock"]; ok {
-		// Convert vector clock to map[string]int
-		vcMap := make(map[string]int)
-		vcBytes, _ := json.Marshal(vcInterface)
-		if err := json.Unmarshal(vcBytes, &vcMap); err == nil {
-			vc = &VectorClock{Clock: vcMap}
-		} else {
-			// If error, create a new one
-			vc = NewVectorClock()
-			vc.Increment(coordinator.NodeID)
-		}
-	} else {
-		// If no vector clock provided, create a new one
-		vc = NewVectorClock()
-		vc.Increment(coordinator.NodeID)
+	incoming := parseStoredValue(body)
+	if incoming.VectorClock == nil || len(incoming.VectorClock.Clock) == 0 {
+		incoming.VectorClock = NewVectorClock()
+		incoming.VectorClock.Increment(coordinator.NodeID)
 	}
 
 	// Check special flags
@@ -388,22 +374,17 @@ func InternalPutHandler(w http.ResponseWriter, r *http.Request) {
 
 	// For any special case, bypass vector clock checks
 	if isForceSync || isHint || isForceKey {
-		coordinator.mu.Lock()
-		coordinator.DataStore[key] = storedValue{
-			Value:       value,
-			VectorClock: vc,
-			Timestamp:   time.Now(),
-		}
-		coordinator.mu.Unlock()
+		incoming.Value = value
+		coordinator.storeReplicaValue(key, incoming)
 		textLog(coordinator.NodeID, "INTERNAL", "Force stored key %s from node %s", key, originNode)
 	} else {
 		// Normal put with vector clock comparison
-		coordinator.localPut(key, value, vc)
+		coordinator.localPut(key, value, incoming.VectorClock)
 	}
 
 	// Log the operation
 	textLog(coordinator.NodeID, "INTERNAL", "Internal PUT completed for key %s with vector clock %v",
-		key, vc.Clock)
+		key, incoming.VectorClock.Clock)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
@@ -512,17 +493,7 @@ func MerkleTreeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// build just that bucket's data
-	treeData := make(map[string]interface{})
-	coordinator.mu.RLock()
-	for k, v := range coordinator.DataStore {
-		if int(hashKey(k))%100 == bucketNum {
-			treeData[k] = v.Value
-		}
-	}
-	coordinator.mu.RUnlock()
-
-	tree := NewMerkleTree(treeData)
+	tree := coordinator.buildMerkleTreeForBucket(bucketNum)
 	serialized := tree.SerializeToMap()
 	js, err := json.Marshal(serialized)
 	if err != nil {
@@ -551,59 +522,11 @@ func RepairHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Handle vector clock with better error handling
-	var vc *VectorClock
-	if vcInterface, ok := body["vector_clock"]; ok {
-		// Convert vector clock to map[string]int
-		vcMap := make(map[string]int)
-		vcBytes, _ := json.Marshal(vcInterface)
-		if err := json.Unmarshal(vcBytes, &vcMap); err == nil {
-			vc = &VectorClock{Clock: vcMap}
-		} else {
-			// If error, create a new one
-			vc = NewVectorClock()
-		}
-	} else {
-		// If no vector clock provided, create a new one
-		vc = NewVectorClock()
-	}
+	sv := parseStoredValue(body)
+	sv.Value = value
+	coordinator.storeReplicaValue(key, sv)
 
-	// Process conflicts if any
-	var conflicts []storedValue
-	if conflictsInterface, ok := body["conflicts"].([]interface{}); ok {
-		for _, conflictInterface := range conflictsInterface {
-			if conflictMap, ok := conflictInterface.(map[string]interface{}); ok {
-				conflictValue := conflictMap["value"]
-				conflictVcInterface := conflictMap["vector_clock"]
-
-				// Convert conflict vector clock with better error handling
-				conflictVcMap := make(map[string]int)
-				conflictVcBytes, _ := json.Marshal(conflictVcInterface)
-				json.Unmarshal(conflictVcBytes, &conflictVcMap)
-
-				conflicts = append(conflicts, storedValue{
-					Value:       conflictValue,
-					VectorClock: &VectorClock{Clock: conflictVcMap},
-					Timestamp:   time.Now(), // Use current time as we don't have original
-				})
-			}
-		}
-	}
-
-	// Create the repaired value
-	sv := storedValue{
-		Value:       value,
-		VectorClock: vc,
-		Conflicts:   conflicts,
-		Timestamp:   time.Now(),
-	}
-
-	// Always store locally without vector clock comparison for repairs
-	coordinator.mu.Lock()
-	coordinator.DataStore[key] = sv
-	coordinator.mu.Unlock()
-
-	textLog(coordinator.NodeID, "REPAIR", "Repaired key %s with value and %d conflicts", key, len(conflicts))
+	textLog(coordinator.NodeID, "REPAIR", "Repaired key %s with value and %d conflicts", key, len(sv.Conflicts))
 
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("OK"))
@@ -698,23 +621,7 @@ func ForceSyncHandler(w http.ResponseWriter, r *http.Request) {
 		// If a specific node is specified, sync only with that node
 		if targetNode, ok := body["node"].(string); ok {
 			textLog(coordinator.NodeID, "ADMIN", "Forcing sync with specific node %s", targetNode)
-
-			// For the test case - look for keys in all nodes that might need to be on this node
-			allNodes := coordinator.Ring.getAllNodeIDs()
-			for _, node := range allNodes {
-				if node != targetNode {
-					// For each node, iterate through DataStore and find keys that should be on targetNode
-					textLog(coordinator.NodeID, "ADMIN", "Checking node %s for keys that should be on %s",
-						node, targetNode)
-
-					// Special handling for the test keys - direct copy
-					coordinator.forceReplicateKeyToNode("fault-key-1745360320", targetNode)
-					coordinator.forceReplicateKeyToNode("hint-key-1745360324", targetNode)
-
-					// Regular anti-entropy sync
-					go coordinator.performAntiEntropyWithNode(targetNode)
-				}
-			}
+			go coordinator.performAntiEntropyWithNode(targetNode)
 
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte(fmt.Sprintf("Sync started with node %s", targetNode)))
@@ -735,12 +642,5 @@ func ForceSyncHandler(w http.ResponseWriter, r *http.Request) {
 
 // Helper function for anti-entropy with a specific node
 func (c *Coordinator) performAntiEntropyWithNode(nodeID string) {
-	// Skip self and any node that's not considered alive
-	if nodeID == c.NodeID || !c.isNodeAvailable(nodeID) {
-		textLog(c.NodeID, "ANTI_ENTROPY", "Skipping anti-entropy with %s (self or unavailable)", nodeID)
-		return
-	}
-
-	textLog(c.NodeID, "ANTI_ENTROPY", "Starting anti-entropy (direct sync) with node %s", nodeID)
-	c.directSyncWithNode(nodeID)
+	c.performMerkleSyncWithNode(nodeID)
 }
