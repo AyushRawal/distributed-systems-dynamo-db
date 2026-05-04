@@ -8,7 +8,7 @@ Implemented features:
 - gossip-based membership and failure detection
 - vector clocks for version tracking
 - hinted handoff and sloppy quorum
-- Merkle-tree support and anti-entropy sync logic
+- Merkle-tree-based anti-entropy using bucket diffs and targeted key repair
 
 ## Prerequisites
 
@@ -110,7 +110,7 @@ The test suite covers:
 - vector clock behavior
 - sloppy quorum during node failure
 - hinted handoff
-- anti-entropy sync
+- Merkle-based anti-entropy sync
 - conflict handling after partition-like scenarios
 
 ### Run Go unit tests manually
@@ -147,6 +147,8 @@ curl http://localhost:5000/admin/cluster
 ```
 
 ### Force an anti-entropy sync
+
+This triggers the same Merkle-tree-based anti-entropy path used by the background scheduler.
 
 ```bash
 curl -X POST http://localhost:5000/admin/sync \
